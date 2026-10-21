@@ -18,3 +18,27 @@ entry = 0x8C010000
 
 # [[relocations]] and [functions] extra: paste from --suggest-config, with a comment saying how
 # each was found. [hooks]: see dreamcomp docs/HOOKS.md.
+
+# Found by `dc.py report --frames 1800 -- --suggest-config`, boot loop round 1: the boot code
+# copies these image regions into low RAM and runs them from there. Untranslated call
+# targets 0x8c000000 and 0x8c000600 are both inside these copies.
+[[relocations]]  # RAM 0x8c000000 reproduces image 0x0c0faa7c for 52 bytes
+source = 0x0C0FAA7C
+size = 0x34
+dest = 0x8C000000
+[[relocations]]  # RAM 0x8c000078 reproduces image 0x0c079428 for 56 bytes
+source = 0x0C079428
+size = 0x38
+dest = 0x8C000078
+[[relocations]]  # RAM 0x8c000100 reproduces image 0x0c0fa9e8 for 52 bytes
+source = 0x0C0FA9E8
+size = 0x34
+dest = 0x8C000100
+[[relocations]]  # RAM 0x8c000400 reproduces image 0x0c0fa9e8 for 52 bytes
+source = 0x0C0FA9E8
+size = 0x34
+dest = 0x8C000400
+[[relocations]]  # RAM 0x8c000600 reproduces image 0x0c0faa20 for 88 bytes
+source = 0x0C0FAA20
+size = 0x58
+dest = 0x8C000600
