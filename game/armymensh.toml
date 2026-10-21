@@ -1,0 +1,20 @@
+# Army Men: Sarge's Heroes (JUE), T-9715N V1.001 -- dreamcomp game config.
+# Format: dreamcomp/engine/docs/game-config.md. Measured on the owner's disc; never commit disc data.
+
+[game]
+id = "armymensh"
+title = "Army Men: Sarge's Heroes"
+region = "JUE"
+product = "T-9715N"
+
+[disc]
+sha1_1st_read = "51384b12a9de6d9a44caecaadafd29dca86807cf"   # the boot file this config was measured against
+
+[binary]
+path = "extracted/fs/1ST_READ.BIN"   # written by tools/dc.py setup, git-ignored
+load_address = 0x8C010000
+link_address = 0x0C010000
+entry = 0x8C010000
+
+# [[relocations]] and [functions] extra: paste from --suggest-config, with a comment saying how
+# each was found. [hooks]: see dreamcomp docs/HOOKS.md.
