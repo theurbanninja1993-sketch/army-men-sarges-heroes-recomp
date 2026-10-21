@@ -9,6 +9,9 @@ product = "T-9715N"
 
 [disc]
 sha1_1st_read = "51384b12a9de6d9a44caecaadafd29dca86807cf"   # the boot file this config was measured against
+gdrom = true   # the game is GD-ROM (IP.BIN device "GD-ROM1/1"); the image is a CD-format copy
+                 # whose tracks sit below LBA 45000, so the engine would otherwise report CD-ROM XA
+                 # and the game loops on drive init (measured 2026-10-20)
 
 [binary]
 path = "extracted/fs/1ST_READ.BIN"   # written by tools/dc.py setup, git-ignored
@@ -42,3 +45,9 @@ dest = 0x8C000400
 source = 0x0C0FAA20
 size = 0x58
 dest = 0x8C000600
+
+# Found by untranslated call targets, boot loop round 2: code in the boot binary's own image
+# (file offset 0x12AD34 onwards) that discovery did not find. How the game reaches it is not yet known.
+[functions]
+extra = [0x8C13AD34, 0x8C13AD7E, 0x8C13AE10, 0x8C13AE1A, 0x8C13AE56, 0x8C13AECE, 0x8C13AF62, 0x8C13AF72,
+         0x0C0FC766, 0x0C0FC770]  # 0x0C0FC766/0x0C0FC770: reached when START is pressed (shots run)
