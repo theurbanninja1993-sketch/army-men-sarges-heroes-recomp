@@ -50,4 +50,15 @@ dest = 0x8C000600
 # (file offset 0x12AD34 onwards) that discovery did not find. How the game reaches it is not yet known.
 [functions]
 extra = [0x8C13AD34, 0x8C13AD7E, 0x8C13AE10, 0x8C13AE1A, 0x8C13AE56, 0x8C13AECE, 0x8C13AF62, 0x8C13AF72,
-         0x0C0FC766, 0x0C0FC770]  # 0x0C0FC766/0x0C0FC770: reached when START is pressed (shots run)
+         0x0C0FC766, 0x0C0FC770,  # 0x0C0FC766/0x0C0FC770: reached when START is pressed (shots run)
+         0x0C057964, 0x0C057BFA]  # round 4, campaign level: 1441 and 2 calls, bytes in the image
+
+# Round 4, Playmode Campaign (level load): copies of image code run from RAM (report suggestions).
+[[relocations]]  # RAM 0x8c00ca60 reproduces image 0x0c1369b8 for 48 bytes
+source = 0x0C1369B8
+size = 0x30
+dest = 0x8C00CA60
+[[relocations]]  # RAM 0x8c00caa8 reproduces image 0x0c136d18 for 72 bytes
+source = 0x0C136D18
+size = 0x48
+dest = 0x8C00CAA8
