@@ -1,0 +1,82 @@
+--- a/src/frontend/menu_ui.cpp
++++ b/src/frontend/menu_ui.cpp
+@@ -39,6 +39,10 @@
+ constexpr const char* kCross = "\xE2\x9C\x97";
+ constexpr const char* kEllipsis = "\xE2\x80\xA6";
+ constexpr const char* kDot = "  \xC2\xB7  ";
++
++bool mouse_sensitivity_key(const std::string& key) {
++    return key == "mouse_sensitivity" || key == "mouse_aim_sensitivity";
++}
+ 
+ std::string esc(const std::string& s) {
+     std::string out;
+@@ -545,16 +549,16 @@
+ }
+ 
+ int MenuUi::slider_value(const std::string& key) const {
+-    if (key != "mouse_sensitivity") return std::clamp(draft_.get_int(key, 100), 0, 100);
++    if (!mouse_sensitivity_key(key)) return std::clamp(draft_.get_int(key, 100), 0, 100);
+     char* end = nullptr;
+-    const auto text = draft_.get(key, "0.12");
++    const auto text = draft_.get(key, draft_.get("mouse_sensitivity", "0.12"));
+     float value = std::strtof(text.c_str(), &end);
+     if (!end || *end || !std::isfinite(value)) value = 0.12f;
+     return static_cast<int>(std::lround(std::clamp(value / 0.0024f, 1.0f, 100.0f)));
+ }
+ 
+ void MenuUi::set_slider_value(const std::string& key, int percent) {
+-    if (key == "mouse_sensitivity")
++    if (mouse_sensitivity_key(key))
+         draft_.set(key, std::to_string(static_cast<float>(std::clamp(percent, 1, 100)) * 0.0024f));
+     else
+         draft_.set(key, std::to_string(std::clamp(percent, 0, 100)));
+@@ -569,7 +573,7 @@
+            "</div><div class=\"pvalue\"><div class=\"slider\" id=\"" + key +
+            "-slider\"><div class=\"track\"><div class=\"fill\" style=\"width: " +
+            std::to_string(percent) + "%;\"></div></div></div><span class=\"slider-val\">" +
+-           (key == "mouse_sensitivity" ? std::to_string(percent * 2) + " %" :
++           (mouse_sensitivity_key(key) ? std::to_string(percent * 2) + " %" :
+             (percent == 0 ? std::string("Off") : std::to_string(percent) + " %")) +
+            "</span></div><span class=\"pend\"></span></div>";
+ }
+@@ -709,8 +713,10 @@
+                            {{"false", "Horizontal only"}, {"true", "Full camera"}},
+                            draft_.get_bool("mouse_vertical", true) ? "true" : "false",
+                            "Horizontal only turns left and right. Full camera also lets you look up and down.", true);
+-        mouse += row_slider("mouse_sensitivity", "Mouse sensitivity", slider_value("mouse_sensitivity"),
+-                            "Mouse turn speed. 100% is the default; changes take effect when you apply.", true);
++        mouse += row_slider("mouse_sensitivity", "Mouse camera sensitivity", slider_value("mouse_sensitivity"),
++                            "Mouse turn speed outside aiming. 100% is the default; changes take effect when you apply.", true);
++        mouse += row_slider("mouse_aim_sensitivity", "Mouse aim sensitivity", slider_value("mouse_aim_sensitivity"),
++                            "Mouse turn speed while aiming with RMB. Changes take effect when you apply.", true);
+     }
+     return mouse + controls_cards();
+ }
+@@ -1205,7 +1211,7 @@
+     } else if (key == "hud_layout") {
+         draft_.set("hud_layout",
+                    cycle({{"edges", ""}, {"center", ""}}, draft_.get("hud_layout", "edges"), step));
+-    } else if (key == "mouse_sensitivity") {
++    } else if (mouse_sensitivity_key(key)) {
+         set_slider_value(key, slider_value(key) + step);
+     } else if (key == "rumble" || key == "volume") {
+         const int v = std::clamp(draft_.get_int(key, 100) + step * 10, 0, 100);
+@@ -1345,7 +1351,7 @@
+             const float x0 = bar->GetAbsoluteLeft() + bar->GetClientLeft();
+             const float w = bar->GetClientWidth();
+             if (w > 0.0f && mx >= x0 - 20.0f && mx <= x0 + w + 20.0f) {
+-                const int quantum = arg == "mouse_sensitivity" ? 1 : 10;
++                const int quantum = mouse_sensitivity_key(arg) ? 1 : 10;
+                 const int v = static_cast<int>(std::clamp((mx - x0) / w, 0.0f, 1.0f) *
+                                               (100.0f / static_cast<float>(quantum)) + 0.5f) * quantum;
+                 set_slider_value(arg, v);
+@@ -1353,7 +1359,7 @@
+             }
+         } else {
+             const int v = slider_value(arg);
+-            const int step = arg == "mouse_sensitivity" ? 1 : 10;
++            const int step = mouse_sensitivity_key(arg) ? 1 : 10;
+             set_slider_value(arg, v >= 100 ? 0 : v + step);
+             dirty_ = true;
+         }

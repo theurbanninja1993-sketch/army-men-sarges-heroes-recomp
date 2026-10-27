@@ -1,0 +1,232 @@
+--- a/engine/render/include/dream/render/vk/window.h
++++ b/engine/render/include/dream/render/vk/window.h
+@@ -126,13 +126,19 @@
+     std::function<bool(const void* sdl_event)> event_filter;
+     // Native camera consumers replace the legacy virtual stick with raw relative motion.
+     std::function<void(float dx, float dy, bool active)> mouse_motion;
++    bool keyboard_strafe = false;  // sideways keyboard stick bindings imply full strafe trigger
+     // Whether a pad's Back/Select button counts as Control::Menu (the binding screen). An overlay
+     // that takes that button for itself turns this off; F1 still opens the binding screen.
+     void set_pad_menu_button(bool yes) noexcept { pad_menu_button_ = yes; }
+     // While set, the guest pad reads as released (pad_held/pad_pressed false, pad_value 0) for
+     // every player: an overlay that owns the keyboard and pads keeps the game running without
+     // the game also acting on its input.
+-    void set_game_input_blocked(bool yes) noexcept { game_input_blocked_ = yes; }
++    void set_game_input_blocked(bool yes) noexcept {
++        if (game_input_blocked_ != yes) {
++            game_input_blocked_ = yes;
++            apply_mouse_capture();
++        }
++    }
+     bool game_input_blocked() const noexcept { return game_input_blocked_; }
+     // Threaded mode (dreamcomp): the thread that created the window pumps SDL with
+     // pump_events() while another thread runs the guest and calls poll(), which then works
+--- a/engine/render/src/vk/window.cpp
++++ b/engine/render/src/vk/window.cpp
+@@ -643,6 +643,16 @@
+     last_poll_ns_ = now_ns;
+     dt = std::clamp(dt, 0.0f, 0.25f);  // a long stall must not jump the ramp to full
+ 
++    // Keep the physical controller's turn behavior. Only keyboard side movement implies
++    // strafing, and engage it immediately so trigger ramping cannot turn the first few frames.
++    bool keyboard_sideways = false;
++    if (keyboard_strafe && !capturing_ && !game_input_blocked_ && keys) {
++        for (unsigned slot = 0; slot < kBindingSlots; ++slot)
++            for (auto control : {PadControl::StickLeft, PadControl::StickRight}) {
++                const Resolved& bind = key_[slot][static_cast<unsigned>(control)];
++                if (bind.source == BindSource::Key && keys[bind.code]) keyboard_sideways = true;
++            }
++    }
+     const float dead = static_cast<float>(bindings_.deadzone_percent) / 100.0f;
+     for (unsigned p = 0; p < kMaxPlayers; ++p) {
+     // Keyboard drives player 0; pad N drives player N (connection order).
+@@ -710,6 +720,8 @@
+                 value = 1.0f;
+         }
+ 
++        if (p == 0 && keyboard_sideways && i == static_cast<unsigned>(PadControl::RightTrigger))
++            value = 1.0f;
+         const bool was = pad_held_[p][i];
+         pad_held_[p][i] = value > 0.0f;
+         pad_pressed_[p][i] = pad_held_[p][i] && !was;
+@@ -1047,7 +1059,7 @@
+     // Relative mode hides the cursor and keeps it in the window while the mouse steers. SDL drops
+     // it by itself when the window loses focus, and F9 turns steering (and so capture) off.
+     if (window_)
+-        SDL_SetWindowRelativeMouseMode(window_, mouse_steer_);
++        SDL_SetWindowRelativeMouseMode(window_, mouse_steer_ && !game_input_blocked_);
+ }
+ 
+ }  // namespace dream::render::vk
+--- a/engine/runtime/boot/boot_main.cpp
++++ b/engine/runtime/boot/boot_main.cpp
+@@ -2329,11 +2329,12 @@
+         }
+         // EXP analog hook: DREAM_EXP_PAD="from:to:ltrig:joy_x:joy_y" sets the analogue state.
+         if (const char* e = std::getenv("DREAM_EXP_PAD")) {
+-            unsigned long long from = 0, to = 0, lt = 0, jx = 128, jy = 128;
+-            if (std::sscanf(e, "%llu:%llu:%llu:%llu:%llu", &from, &to, &lt, &jx, &jy) == 5) {
++            unsigned long long from = 0, to = 0, lt = 0, jx = 128, jy = 128, rt = 0;
++            if (std::sscanf(e, "%llu:%llu:%llu:%llu:%llu:%llu", &from, &to, &lt, &jx, &jy, &rt) >= 5) {
+                 const std::uint64_t f = sys.spg.frames();
+                 if (f >= from && f < to) {
+                     pad_ptr->state.ltrigger = static_cast<std::uint8_t>(lt);
++                    pad_ptr->state.rtrigger = static_cast<std::uint8_t>(rt);
+                     pad_ptr->state.joy_x = static_cast<std::uint8_t>(jx);
+                     pad_ptr->state.joy_y = static_cast<std::uint8_t>(jy);
+                 }
+@@ -2405,6 +2406,8 @@
+             bindings_file_set ? bindings_file : dream::render::vk::default_bindings_path();
+         live->load_bindings();
+         live->window.rumble_scale = static_cast<float>(rumble_percent) / 100.0f;
++        for (auto* e : dream::host::extensions())
++            if (e->wants_keyboard_strafe()) live->window.keyboard_strafe = true;
+         for (auto* e : dream::host::extensions()) {
+             if (!e->wants_mouse_motion()) continue;
+             Live* lp = live.get();
+--- a/engine/runtime/include/dream/runtime/host_ext.h
++++ b/engine/runtime/include/dream/runtime/host_ext.h
+@@ -47,6 +47,7 @@
+     // Raw relative mouse samples, on the guest thread once per input poll. A subscriber
+     // replaces legacy mouse-to-stick steering; F9 still toggles mouse capture and motion.
+     virtual bool wants_mouse_motion() { return false; }
++    virtual bool wants_keyboard_strafe() { return false; }
+     virtual void on_mouse_motion(float dx, float dy, bool active) { (void)dx; (void)dy; (void)active; }
+     // Each decoded display list, before it is drawn (window builds only). Vertices are in the
+     // guest's 640x480 screen space and may be edited: widescreen HUD correction, debug overlays.
+--- a/include/dreamcomp/port.h
++++ b/include/dreamcomp/port.h
+@@ -26,6 +26,7 @@
+ struct PortInfo {
+     const char* id = nullptr;     // settings folder name, e.g. "soulcalibur"
+     const char* title = nullptr;  // shown in the window title and menus
++    bool mouse_camera = false;   // expose native mouse mode and sensitivity in Controls
+     unsigned players = 4;         // player cards in the Controls tab (1..4, Maple ports A-D)
+ 
+     // Widescreen. Called every vblank on the guest thread with the target aspect ratio (4/3 means
+@@ -62,6 +63,8 @@
+ 
+     // Anything else the port wants each vblank (cheats, debug overlays...).
+     void (*on_vblank)(dream::System& sys, Settings& settings) = nullptr;
++    // On the guest thread after the in-game settings menu applies a draft.
++    void (*on_settings_changed)(Settings& settings) = nullptr;
+     // Once, before the first guest instruction.
+     void (*on_start)(dream::System& sys, Settings& settings) = nullptr;
+ };
+--- a/src/core.cpp
++++ b/src/core.cpp
+@@ -783,6 +783,7 @@
+         if (hc.set_fullscreen && hc.fullscreen &&
+             hc.fullscreen() != g_settings.get_bool("fullscreen", false))
+             hc.set_fullscreen(g_settings.get_bool("fullscreen", false));
++        if (g_port && g_port->on_settings_changed) g_port->on_settings_changed(g_settings);
+         launch_dirty_ = false;  // the file now holds what is in effect
+         std::printf("dreamcomp: applied in game: aspect %s, hud %s/%s, rumble %d%%, fullscreen %s\n",
+                     expanded_aspect() ? "expanded" : "original", hud_fix_ ? "on" : "off",
+--- a/src/frontend/menu_ui.cpp
++++ b/src/frontend/menu_ui.cpp
+@@ -544,6 +544,22 @@
+     dirty_ = true;
+ }
+ 
++int MenuUi::slider_value(const std::string& key) const {
++    if (key != "mouse_sensitivity") return std::clamp(draft_.get_int(key, 100), 0, 100);
++    char* end = nullptr;
++    const auto text = draft_.get(key, "0.12");
++    float value = std::strtof(text.c_str(), &end);
++    if (!end || *end || !std::isfinite(value)) value = 0.12f;
++    return static_cast<int>(std::lround(std::clamp(value / 0.0024f, 1.0f, 100.0f)));
++}
++
++void MenuUi::set_slider_value(const std::string& key, int percent) {
++    if (key == "mouse_sensitivity")
++        draft_.set(key, std::to_string(static_cast<float>(std::clamp(percent, 1, 100)) * 0.0024f));
++    else
++        draft_.set(key, std::to_string(std::clamp(percent, 0, 100)));
++}
++
+ std::string MenuUi::row_slider(const std::string& key, const std::string& name, int percent,
+                                const std::string& help, bool live) {
+     const std::string id = "r-" + key;
+@@ -553,7 +569,8 @@
+            "</div><div class=\"pvalue\"><div class=\"slider\" id=\"" + key +
+            "-slider\"><div class=\"track\"><div class=\"fill\" style=\"width: " +
+            std::to_string(percent) + "%;\"></div></div></div><span class=\"slider-val\">" +
+-           (percent == 0 ? std::string("Off") : std::to_string(percent) + " %") +
++           (key == "mouse_sensitivity" ? std::to_string(percent * 2) + " %" :
++            (percent == 0 ? std::string("Off") : std::to_string(percent) + " %")) +
+            "</span></div><span class=\"pend\"></span></div>";
+ }
+ 
+@@ -582,7 +599,9 @@
+     return draft_expanded() ? std::min(16.0f / 9.0f, cfg_.port->max_aspect) : 4.0f / 3.0f;
+ }
+ 
+-bool MenuUi::tab_has_settings(int tab) const { return tab != 1; }
++bool MenuUi::tab_has_settings(int tab) const {
++    return tab != 1 || (ctl_view_ == 0 && cfg_.port && cfg_.port->mouse_camera);
++}
+ 
+ // ---- pages ------------------------------------------------------------------------------------------
+ 
+@@ -675,7 +694,17 @@
+ std::string MenuUi::tab_controls() {
+     if (!bindings_loaded_)
+         load_bindings();
+-    return ctl_view_ == 0 ? controls_cards() : controls_mappings();
++    if (ctl_view_ != 0) return controls_mappings();
++    std::string mouse;
++    if (cfg_.port && cfg_.port->mouse_camera) {
++        mouse += row_radio("mouse_vertical", "Mouse camera",
++                           {{"false", "Horizontal only"}, {"true", "Full camera"}},
++                           draft_.get_bool("mouse_vertical", true) ? "true" : "false",
++                           "Horizontal only turns left and right. Full camera also lets you look up and down.", true);
++        mouse += row_slider("mouse_sensitivity", "Mouse sensitivity", slider_value("mouse_sensitivity"),
++                            "Mouse turn speed. 100% is the default; changes take effect when you apply.", true);
++    }
++    return mouse + controls_cards();
+ }
+ 
+ std::string MenuUi::controls_cards() {
+@@ -1168,6 +1197,8 @@
+     } else if (key == "hud_layout") {
+         draft_.set("hud_layout",
+                    cycle({{"edges", ""}, {"center", ""}}, draft_.get("hud_layout", "edges"), step));
++    } else if (key == "mouse_sensitivity") {
++        set_slider_value(key, slider_value(key) + step);
+     } else if (key == "rumble" || key == "volume") {
+         const int v = std::clamp(draft_.get_int(key, 100) + step * 10, 0, 100);
+         draft_.set(key, std::to_string(v));
+@@ -1306,14 +1337,16 @@
+             const float x0 = bar->GetAbsoluteLeft() + bar->GetClientLeft();
+             const float w = bar->GetClientWidth();
+             if (w > 0.0f && mx >= x0 - 20.0f && mx <= x0 + w + 20.0f) {
+-                const int v =
+-                    static_cast<int>(std::clamp((mx - x0) / w, 0.0f, 1.0f) * 10.0f + 0.5f) * 10;
+-                draft_.set(arg, std::to_string(v));
++                const int quantum = arg == "mouse_sensitivity" ? 1 : 10;
++                const int v = static_cast<int>(std::clamp((mx - x0) / w, 0.0f, 1.0f) *
++                                              (100.0f / static_cast<float>(quantum)) + 0.5f) * quantum;
++                set_slider_value(arg, v);
+                 dirty_ = true;
+             }
+         } else {
+-            const int v = draft_.get_int(arg, 100);
+-            draft_.set(arg, std::to_string(v >= 100 ? 0 : v + 10));
++            const int v = slider_value(arg);
++            const int step = arg == "mouse_sensitivity" ? 1 : 10;
++            set_slider_value(arg, v >= 100 ? 0 : v + step);
+             dirty_ = true;
+         }
+     } else if (kind == "mod" || kind == "modup" || kind == "moddown") {
+--- a/src/frontend/menu_ui.h
++++ b/src/frontend/menu_ui.h
+@@ -122,6 +122,8 @@
+     std::string row_onoff(const std::string& key, const std::string& name, bool on,
+                           const std::string& help, bool live);
+     void select(const std::string& key, const std::string& value);
++    int slider_value(const std::string& key) const;
++    void set_slider_value(const std::string& key, int percent);
+     std::string row_toggle(const std::string& key, const std::string& name, bool on,
+                            const std::string& help, bool live);
+     std::string row_slider(const std::string& key, const std::string& name, int percent,

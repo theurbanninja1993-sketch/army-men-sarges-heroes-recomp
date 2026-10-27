@@ -1,0 +1,26 @@
+--- a/engine/render/src/vk/window.cpp
++++ b/engine/render/src/vk/window.cpp
+@@ -349,12 +349,18 @@
+     subpass.pDepthStencilAttachment = &depth_ref;
+     VkSubpassDependency dep{};
+     dep.srcSubpass = VK_SUBPASS_EXTERNAL;
+-    dep.srcStageMask =
+-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+-    dep.dstStageMask =
+-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+-    dep.dstAccessMask =
++    // Every swapchain framebuffer uses the same depth attachment. An earlier
++    // present may still perform its late depth store when the next pass clears
++    // that image, especially when native and inserted frames are submitted together.
++    dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
++                       VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
++                       VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
++    dep.dstStageMask = dep.srcStageMask;
++    dep.srcAccessMask =
+         VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
++    dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
++                        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
++                        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+     VkRenderPassCreateInfo rci{};
+     rci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+     rci.attachmentCount = 2;

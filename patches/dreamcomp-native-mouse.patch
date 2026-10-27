@@ -1,0 +1,69 @@
+--- a/engine/runtime/include/dream/runtime/host_ext.h
++++ b/engine/runtime/include/dream/runtime/host_ext.h
+@@ -44,6 +44,10 @@
+     virtual void usage(std::FILE* out) { (void)out; }
+     virtual void on_start(System& sys) { (void)sys; }
+     virtual void on_vblank(System& sys) { (void)sys; }
++    // Raw relative mouse samples, on the guest thread once per input poll. A subscriber
++    // replaces legacy mouse-to-stick steering; F9 still toggles mouse capture and motion.
++    virtual bool wants_mouse_motion() { return false; }
++    virtual void on_mouse_motion(float dx, float dy, bool active) { (void)dx; (void)dy; (void)active; }
+     // Each decoded display list, before it is drawn (window builds only). Vertices are in the
+     // guest's 640x480 screen space and may be edited: widescreen HUD correction, debug overlays.
+     virtual void on_frame(render::Frame& frame) { (void)frame; }
+--- a/engine/render/include/dream/render/vk/window.h
++++ b/engine/render/include/dream/render/vk/window.h
+@@ -124,6 +124,8 @@
+     // `const SDL_Event*`); returning true consumes it, so poll() does nothing else with it. The
+     // keyboard and pad *state* the game reads is unaffected: the caller pauses the guest instead.
+     std::function<bool(const void* sdl_event)> event_filter;
++    // Native camera consumers replace the legacy virtual stick with raw relative motion.
++    std::function<void(float dx, float dy, bool active)> mouse_motion;
+     // Whether a pad's Back/Select button counts as Control::Menu (the binding screen). An overlay
+     // that takes that button for itself turns this off; F1 still opens the binding screen.
+     void set_pad_menu_button(bool yes) noexcept { pad_menu_button_ = yes; }
+--- a/engine/render/src/vk/window.cpp
++++ b/engine/render/src/vk/window.cpp
+@@ -553,7 +553,7 @@
+                     mouse_steer_ = !mouse_steer_;
+                     vstick_x_ = vstick_y_ = 0.0f;
+                     apply_mouse_capture();
+-                    std::printf("mouse steering %s (F9)\n", mouse_steer_ ? "on" : "off");
++                    std::printf("mouse control %s (F9)\n", mouse_steer_ ? "on" : "off");
+                 } else if (ev.key.key == SDLK_ESCAPE && escape_quits_) {
+                     running_ = false;
+                 } else if (ev.key.key == SDLK_RETURN && (ev.key.mod & SDL_KMOD_ALT) &&
+@@ -610,7 +610,12 @@
+     // the mouse stops (dreamcomp mouse steering).
+     float mrx = 0.0f, mry = 0.0f;
+     SDL_GetRelativeMouseState(&mrx, &mry);
+-    if (mouse_steer_ && !capturing_) {
++    if (mouse_motion) {
++        vstick_x_ = vstick_y_ = 0.0f;
++        const bool active = mouse_steer_ && !capturing_ && !game_input_blocked_ &&
++                            (SDL_GetWindowFlags(window_) & SDL_WINDOW_INPUT_FOCUS);
++        mouse_motion(active ? mrx : 0.0f, active ? mry : 0.0f, active);
++    } else if (mouse_steer_ && !capturing_) {
+         // Forward and back do nothing until the right button (aim) is held: a player who only
+         // turns with the mouse must not walk.
+         const bool aim_held = (mouse_buttons & SDL_BUTTON_MASK(SDL_BUTTON_RIGHT)) != 0;
+--- a/engine/runtime/boot/boot_main.cpp
++++ b/engine/runtime/boot/boot_main.cpp
+@@ -2405,6 +2405,17 @@
+             bindings_file_set ? bindings_file : dream::render::vk::default_bindings_path();
+         live->load_bindings();
+         live->window.rumble_scale = static_cast<float>(rumble_percent) / 100.0f;
++        for (auto* e : dream::host::extensions()) {
++            if (!e->wants_mouse_motion()) continue;
++            Live* lp = live.get();
++            lp->window.mouse_motion = [lp](float dx, float dy, bool active) {
++                active = active && !lp->menu.is_open() && !lp->overlay_open();
++                if (!active) dx = dy = 0.0f;
++                for (auto* subscriber : dream::host::extensions())
++                    if (subscriber->wants_mouse_motion()) subscriber->on_mouse_motion(dx, dy, active);
++            };
++            break;
++        }
+         // dreamcomp: an extension's in-game overlay takes Escape and the pad's Back button, sees
+         // events first, and may ask the launcher to quit or open the binding screen.
+         for (auto* e : dream::host::extensions())

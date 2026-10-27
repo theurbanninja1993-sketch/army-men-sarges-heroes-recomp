@@ -1,0 +1,133 @@
+--- a/engine/render/src/interpolate.cpp
++++ b/engine/render/src/interpolate.cpp
+@@ -356,49 +356,88 @@
+             out.vertices[i].z = position.z;
+         }
+     }
+-    // A partial match can still fold a face after shared-corner repair. Restore
+-    // its corners and all their shared copies together; recheck adjacent faces
+-    // until stable. Each corner can be restored only once, so this terminates.
+-    // This preserves seams without freezing an entire connected terrain mesh.
+-    struct Triangle {
+-        std::size_t first;
+-        std::array<std::size_t, 3> corners;
+-    };
+-    std::vector<Triangle> triangles;
++    // Partial matches can fold triangles or bend a planar strip (for example an
++    // exterior wall into its interior lining). Restore unsafe surfaces and every
++    // shared copy together, then recheck their neighbours until stable.
++    struct Constraint {
++        std::size_t first, count, corner_first, basis;
++    };
++    std::vector<Constraint> constraints;
++    std::vector<std::size_t> constraint_corners;
+     std::vector<std::vector<std::size_t>> incident(out.vertices.size()),
+         members(out.vertices.size());
+     for (std::size_t i = 0; i < out.vertices.size(); ++i)
+         members[root(i)].push_back(i);
++    auto area = [](const Vertex &a, const Vertex &b, const Vertex &c) {
++        return (double(b.x) - a.x) * (double(c.y) - a.y) -
++               (double(b.y) - a.y) * (double(c.x) - a.x);
++    };
++    auto planar = [&](const Frame &f, std::size_t first, std::size_t count,
++                      std::size_t basis, double tolerance) {
++        const auto &a = f.vertices[first + basis];
++        const auto &b = f.vertices[first + basis + 1];
++        const auto &c = f.vertices[first + basis + 2];
++        const double det = area(a, b, c);
++        if (!std::isfinite(det) || std::abs(det) < 1.0)
++            return false;
++        // Reciprocal depth is affine in projected X/Y for a planar surface.
++        const double zx = ((double(b.z) - a.z) * (double(c.y) - a.y) -
++                           (double(c.z) - a.z) * (double(b.y) - a.y)) / det;
++        const double zy = ((double(b.x) - a.x) * (double(c.z) - a.z) -
++                           (double(c.x) - a.x) * (double(b.z) - a.z)) / det;
++        for (std::size_t k = 0; k < count; ++k) {
++            const auto &v = f.vertices[first + k];
++            const double z = a.z + zx * (double(v.x) - a.x) + zy * (double(v.y) - a.y);
++            if (!std::isfinite(z) || std::abs(z - v.z) >
++                std::max(1e-7, std::abs(double(v.z)) * tolerance))
++                return false;
++        }
++        return true;
++    };
++    auto add_constraint = [&](std::size_t first, std::size_t count, std::size_t basis) {
++        const auto index = constraints.size();
++        constraints.push_back({first, count, constraint_corners.size(), basis});
++        for (std::size_t k = 0; k < count; ++k) {
++            const auto corner = root(first + k);
++            constraint_corners.push_back(corner);
++            incident[corner].push_back(index);
++        }
++    };
+     for (const auto &list : newer.lists)
+         for (const auto &poly : list) {
++            double largest = 0;
++            std::size_t basis = 0;
+             for (std::uint32_t k = 2; k < poly.count; ++k) {
+                 const std::size_t first = poly.first + k - 2;
+-                Triangle tri{first, {root(first), root(first + 1), root(first + 2)}};
+-                for (auto corner : tri.corners)
+-                    incident[corner].push_back(triangles.size());
+-                triangles.push_back(tri);
+-            }
+-        }
+-    std::vector<std::size_t> pending(triangles.size());
++                add_constraint(first, 3, 0);
++                const double size = std::abs(area(newer.vertices[first], newer.vertices[first + 1],
++                                                  newer.vertices[first + 2]));
++                if (size > largest) { largest = size; basis = k - 2; }
++            }
++            // Flat HUD layers and natively nonplanar strips retain their existing rules.
++            if (poly.count > 3 && largest >= 1 && spatial[poly.first] &&
++                planar(newer, poly.first, poly.count, basis, 1e-5))
++                add_constraint(poly.first, poly.count, basis);
++        }
++    std::vector<std::size_t> pending(constraints.size());
+     for (std::size_t i = 0; i < pending.size(); ++i)
+         pending[i] = i;
+-    std::vector<bool> queued(triangles.size(), true), restored(out.vertices.size(), false);
+-    auto area = [](const Vertex &a, const Vertex &b, const Vertex &c) {
+-        return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+-    };
++    std::vector<bool> queued(constraints.size(), true), restored(out.vertices.size(), false);
+     for (std::size_t next = 0; next < pending.size(); ++next) {
+         const auto index = pending[next];
+         queued[index] = false;
+-        const auto &tri = triangles[index];
+-        const auto first = tri.first;
+-        const float native =
+-            area(newer.vertices[first], newer.vertices[first + 1], newer.vertices[first + 2]);
+-        const float mixed =
+-            area(out.vertices[first], out.vertices[first + 1], out.vertices[first + 2]);
+-        if (std::abs(native) <= 1.f ||
+-            (native * mixed > 0 && std::abs(mixed) >= std::abs(native) * .25f))
+-            continue;
+-        for (auto corner : tri.corners) {
++        const auto &surface = constraints[index];
++        const auto first = surface.first;
++        if (surface.count == 3) {
++            const double native = area(newer.vertices[first], newer.vertices[first + 1], newer.vertices[first + 2]);
++            const double mixed = area(out.vertices[first], out.vertices[first + 1], out.vertices[first + 2]);
++            if (std::abs(native) <= 1 ||
++                (native * mixed > 0 && std::abs(mixed) >= std::abs(native) * .25))
++                continue;
++        } else if (planar(out, first, surface.count, surface.basis, 1e-4))
++            continue;
++        for (std::size_t k = 0; k < surface.count; ++k) {
++            const auto corner = constraint_corners[surface.corner_first + k];
+             if (restored[corner])
+                 continue;
+             restored[corner] = true;
+--- a/engine/render/include/dream/render/interpolate.h
++++ b/engine/render/include/dream/render/interpolate.h
+@@ -49,7 +49,8 @@
+ // `out` becomes `newer` with plausibly moving strips paired by spatial/depth proximity
+ // after the ordered camera-cut probe. Pairs may cross submission order; large relative
+ // depth changes retain native geometry. Positions are blended before projection to
+-// preserve planar surfaces, and unsafe shared corners revert together to avoid folds.
++// preserve planar surfaces. Unsafe triangles and bent planar panels restore their
++// shared corners together, avoiding folds and surfaces crossing their wall linings.
+ // Texture coordinates and colours come from `newer`. Returns false (and
+ // leaves `out` equal to `newer`) on a camera cut. `pairs` is scratch storage, kept by the caller.
+ bool blend_frames(const Frame& older, const Frame& newer, const BlendOptions& opt,

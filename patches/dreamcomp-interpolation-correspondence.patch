@@ -1,0 +1,88 @@
+--- a/engine/render/src/interpolate.cpp
++++ b/engine/render/src/interpolate.cpp
+@@ -10,9 +10,44 @@
+ 
+ namespace {
+ 
+-bool same(const Polygon& a, const Polygon& b) {
+-    return a.count == b.count && a.pcw == b.pcw && a.isp == b.isp && a.tsp == b.tsp &&
+-           a.tcw == b.tcw && a.tsp1 == b.tsp1 && a.tcw1 == b.tcw1;
++bool same(const Frame& older, const Polygon& a, const Frame& newer, const Polygon& b) {
++    if (a.count != b.count || a.pcw != b.pcw || a.isp != b.isp || a.tsp != b.tsp ||
++        a.tcw != b.tcw || a.tsp1 != b.tsp1 || a.tcw1 != b.tcw1)
++        return false;
++
++    // Many unrelated faces share a material. Matching only render state can
++    // pair different tree branches, terrain faces, or atlas regions after culling
++    // changes submission order. Require the same texture corner correspondence.
++    if (a.pcw & 8u) {
++        for (std::uint32_t k = 0; k < a.count; ++k) {
++            const Vertex& va = older.vertices[a.first + k];
++            const Vertex& vb = newer.vertices[b.first + k];
++            if (!std::isfinite(va.u) || !std::isfinite(va.v) ||
++                !std::isfinite(vb.u) || !std::isfinite(vb.v) ||
++                std::abs(va.u - vb.u) > 0.00001f || std::abs(va.v - vb.v) > 0.00001f)
++                return false;
++        }
++    }
++
++    auto area = [](const Vertex& v0, const Vertex& v1, const Vertex& v2) {
++        return (v1.x - v0.x) * (v2.y - v0.y) - (v1.y - v0.y) * (v2.x - v0.x);
++    };
++    for (std::uint32_t k = 2; k < a.count; ++k) {
++        const float aa = area(older.vertices[a.first + k - 2], older.vertices[a.first + k - 1],
++                              older.vertices[a.first + k]);
++        const float ab = area(newer.vertices[b.first + k - 2], newer.vertices[b.first + k - 1],
++                              newer.vertices[b.first + k]);
++        if (!std::isfinite(aa) || !std::isfinite(ab))
++            return false;
++        const float small = std::min(std::abs(aa), std::abs(ab));
++        const float large = std::max(std::abs(aa), std::abs(ab));
++        // Similar UVs are still ambiguous on repeated faces. Opposite winding
++        // or a drastic area change is not a safe correspondence; keep the native
++        // face when it turns edge-on or its clipped topology changes instead.
++        if (small > 1.0f && (aa * ab < 0.0f || small < large * 0.25f))
++            return false;
++    }
++    return true;
+ }
+ 
+ }  // namespace
+@@ -29,7 +64,7 @@
+         for (const auto& p : B) st.vertices_b += p.count;
+         std::size_t i = 0, j = 0;
+         while (i < A.size() && j < B.size()) {
+-            if (same(A[i], B[j])) {
++            if (same(older, A[i], newer, B[j])) {
+                 out.push_back({l, static_cast<std::uint32_t>(i), static_cast<std::uint32_t>(j)});
+                 ++st.matched;
+                 st.matched_vertices += B[j].count;
+@@ -40,11 +75,11 @@
+             // The nearest resynchronisation: older has extra strips, or newer has new ones.
+             std::size_t skip_a = 0, skip_b = 0;
+             for (unsigned d = 1; d <= window; ++d) {
+-                if (i + d < A.size() && same(A[i + d], B[j])) {
++                if (i + d < A.size() && same(older, A[i + d], newer, B[j])) {
+                     skip_a = d;
+                     break;
+                 }
+-                if (j + d < B.size() && same(A[i], B[j + d])) {
++                if (j + d < B.size() && same(older, A[i], newer, B[j + d])) {
+                     skip_b = d;
+                     break;
+                 }
+--- a/engine/render/include/dream/render/interpolate.h
++++ b/engine/render/include/dream/render/interpolate.h
+@@ -5,8 +5,10 @@
+ // with the same strip of the older one and their vertex positions are blended. Strips carry no
+ // identity; pairing relies on games emitting their scene in a stable order, which
+ // docs/INTERPOLATION.md (dreamcomp) measures per game. A strip pairs with one of the same signature
+-// -- the parameter words (PCW/ISP/TSP/TCW) and vertex count -- in submission order, skipping at most
+-// `window` unmatched strips on either side (objects appearing, disappearing or clipped differently).
++// -- the parameter words (PCW/ISP/TSP/TCW), vertex count, texture corners, and compatible triangle
++// winding/area -- in submission order, skipping at most `window` unmatched strips on either side.
++// Ambiguous faces or changed clipped topology retain the native frame instead of being morphed
++// into unrelated geometry that happens to share a texture.
+ #pragma once
+ 
+ #include <cstdint>

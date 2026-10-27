@@ -1,0 +1,181 @@
+--- a/engine/render/src/interpolate.cpp
++++ b/engine/render/src/interpolate.cpp
+@@ -361,6 +361,7 @@
+     // shared copy together, then recheck their neighbours until stable.
+     struct Constraint {
+         std::size_t first, count, corner_first, basis;
++        std::size_t layer = std::size_t(-1);
+     };
+     std::vector<Constraint> constraints;
+     std::vector<std::size_t> constraint_corners;
+@@ -372,28 +373,49 @@
+         return (double(b.x) - a.x) * (double(c.y) - a.y) -
+                (double(b.y) - a.y) * (double(c.x) - a.x);
+     };
+-    auto planar = [&](const Frame &f, std::size_t first, std::size_t count,
+-                      std::size_t basis, double tolerance) {
++    struct DepthPlane { double x, y, constant; bool valid; };
++    auto depth_plane = [&](const Frame &f, std::size_t first, std::size_t basis) {
+         const auto &a = f.vertices[first + basis];
+         const auto &b = f.vertices[first + basis + 1];
+         const auto &c = f.vertices[first + basis + 2];
+         const double det = area(a, b, c);
+         if (!std::isfinite(det) || std::abs(det) < 1.0)
+-            return false;
+-        // Reciprocal depth is affine in projected X/Y for a planar surface.
++            return DepthPlane{0, 0, 0, false};
+         const double zx = ((double(b.z) - a.z) * (double(c.y) - a.y) -
+                            (double(c.z) - a.z) * (double(b.y) - a.y)) / det;
+         const double zy = ((double(b.x) - a.x) * (double(c.z) - a.z) -
+                            (double(c.x) - a.x) * (double(b.z) - a.z)) / det;
++        return DepthPlane{zx, zy, a.z - zx * a.x - zy * a.y, true};
++    };
++    auto depth_at = [](const DepthPlane &p, double x, double y) {
++        return p.x * x + p.y * y + p.constant;
++    };
++    auto planar = [&](const Frame &f, std::size_t first, std::size_t count,
++                      std::size_t basis, double tolerance) {
++        const auto plane = depth_plane(f, first, basis);
++        if (!plane.valid) return false;
+         for (std::size_t k = 0; k < count; ++k) {
+             const auto &v = f.vertices[first + k];
+-            const double z = a.z + zx * (double(v.x) - a.x) + zy * (double(v.y) - a.y);
++            const double z = depth_at(plane, v.x, v.y);
+             if (!std::isfinite(z) || std::abs(z - v.z) >
+                 std::max(1e-7, std::abs(double(v.z)) * tolerance))
+                 return false;
+         }
+         return true;
+     };
++    struct Panel {
++        std::size_t first, count, basis;
++        DepthPlane plane;
++        std::array<double, 3> normal;
++        double x0, y0, x1, y1;
++    };
++    std::vector<Panel> panels;
++    struct Layer {
++        std::size_t a, b;
++        double x0, y0, x1, y1;
++        int order;
++    };
++    std::vector<Layer> layers;
+     auto add_constraint = [&](std::size_t first, std::size_t count, std::size_t basis) {
+         const auto index = constraints.size();
+         constraints.push_back({first, count, constraint_corners.size(), basis});
+@@ -403,8 +425,8 @@
+             incident[corner].push_back(index);
+         }
+     };
+-    for (const auto &list : newer.lists)
+-        for (const auto &poly : list) {
++    for (std::size_t l = 0; l < newer.lists.size(); ++l)
++        for (const auto &poly : newer.lists[l]) {
+             double largest = 0;
+             std::size_t basis = 0;
+             for (std::uint32_t k = 2; k < poly.count; ++k) {
+@@ -415,10 +437,69 @@
+                 if (size > largest) { largest = size; basis = k - 2; }
+             }
+             // Flat HUD layers and natively nonplanar strips retain their existing rules.
+-            if (poly.count > 3 && largest >= 1 && spatial[poly.first] &&
+-                planar(newer, poly.first, poly.count, basis, 1e-5))
+-                add_constraint(poly.first, poly.count, basis);
+-        }
++            if (largest < 1 || !spatial[poly.first] ||
++                !planar(newer, poly.first, poly.count, basis, 1e-5)) continue;
++            if (poly.count > 3) add_constraint(poly.first, poly.count, basis);
++            if (l != 0 && l != 4) continue; // depth-writing world surfaces
++            Panel panel{poly.first, poly.count, basis, depth_plane(newer, poly.first, basis),
++                        {}, 640, 480, 0, 0};
++            for (std::size_t k = 0; k < poly.count; ++k) {
++                const auto &v = newer.vertices[poly.first+k];
++                panel.x0 = std::min(panel.x0, double(v.x)); panel.x1 = std::max(panel.x1, double(v.x));
++                panel.y0 = std::min(panel.y0, double(v.y)); panel.y1 = std::max(panel.y1, double(v.y));
++            }
++            panel.x0 = std::max(0., panel.x0); panel.x1 = std::min(640., panel.x1);
++            panel.y0 = std::max(0., panel.y0); panel.y1 = std::min(480., panel.y1);
++            if (panel.x1-panel.x0 < 1 || panel.y1-panel.y0 < 1) continue;
++            // Compare plane orientations in centred, normalized screen coordinates.
++            panel.normal = {320*panel.plane.x, 320*panel.plane.y,
++                depth_at(panel.plane, 320, 240)};
++            const double norm = std::hypot(panel.normal[0], panel.normal[1], panel.normal[2]);
++            if (!(norm > 0) || !std::isfinite(norm)) continue;
++            for (auto &v : panel.normal) v /= norm;
++            panels.push_back(panel);
++        }
++    // A panel can stay planar yet cross a nearby parallel lining when only one
++    // layer interpolates. Preserve the native ordering of such thin wall layers.
++    // A screen grid limits comparisons, and coplanar neighbours are unconstrained.
++    std::array<std::vector<std::size_t>, 80> grid;
++    std::vector<std::size_t> seen(panels.size(), std::size_t(-1));
++    for (std::size_t i = 0; i < panels.size(); ++i) {
++        const auto &a = panels[i];
++        const int x0 = std::clamp(int(a.x0 / 64), 0, 9), x1 = std::clamp(int(a.x1 / 64), 0, 9);
++        const int y0 = std::clamp(int(a.y0 / 64), 0, 7), y1 = std::clamp(int(a.y1 / 64), 0, 7);
++        for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
++            auto &cell = grid[std::size_t(y * 10 + x)];
++            for (auto j : cell) {
++                if (seen[j] == i) continue;
++                seen[j] = i;
++                const auto &b = panels[j];
++                const double dot = a.normal[0]*b.normal[0]+a.normal[1]*b.normal[1]+a.normal[2]*b.normal[2];
++                if (dot < 1-1e-7) continue;
++                Layer layer{i, j, std::max(a.x0,b.x0), std::max(a.y0,b.y0),
++                            std::min(a.x1,b.x1), std::min(a.y1,b.y1), 0};
++                if (layer.x1-layer.x0 < 1 || layer.y1-layer.y0 < 1) continue;
++                bool front = false, back = false, close = true;
++                for (double px : {layer.x0,layer.x1}) for (double py : {layer.y0,layer.y1}) {
++                    const double za = depth_at(a.plane,px,py), zb = depth_at(b.plane,px,py);
++                    const double scale = std::max(std::abs(za),std::abs(zb));
++                    if (za <= 0 || zb <= 0) continue; // extrapolated area outside the visible panel
++                    close &= std::abs(za-zb) < scale*.05;
++                    front |= za-zb > scale*2e-6; back |= zb-za > scale*2e-6;
++                }
++                if (!close || front == back) continue;
++                layer.order = front ? 1 : -1;
++                const auto index = constraints.size(), corners_at = constraint_corners.size();
++                for (const auto *panel : {&a,&b}) for (std::size_t k = 0; k < panel->count; ++k) {
++                    const auto corner = root(panel->first+k);
++                    constraint_corners.push_back(corner); incident[corner].push_back(index);
++                }
++                constraints.push_back({a.first,a.count+b.count,corners_at,0,layers.size()});
++                layers.push_back(layer);
++            }
++            cell.push_back(i);
++        }
++    }
+     std::vector<std::size_t> pending(constraints.size());
+     for (std::size_t i = 0; i < pending.size(); ++i)
+         pending[i] = i;
+@@ -428,7 +509,19 @@
+         queued[index] = false;
+         const auto &surface = constraints[index];
+         const auto first = surface.first;
+-        if (surface.count == 3) {
++        if (surface.layer != std::size_t(-1)) {
++            const auto &layer = layers[surface.layer];
++            const auto &a = panels[layer.a], &b = panels[layer.b];
++            const auto pa = depth_plane(out,a.first,a.basis), pb = depth_plane(out,b.first,b.basis);
++            bool reversed = !pa.valid || !pb.valid;
++            for (double px : {layer.x0,layer.x1}) for (double py : {layer.y0,layer.y1}) {
++                const double za = depth_at(pa,px,py), zb = depth_at(pb,px,py);
++                const double tolerance = std::max(1e-7,std::max(std::abs(za),std::abs(zb))*2e-6);
++                reversed |= !std::isfinite(za) || !std::isfinite(zb) ||
++                    (za > 0 && zb > 0 && (za-zb)*layer.order < -tolerance);
++            }
++            if (!reversed) continue;
++        } else if (surface.count == 3) {
+             const double native = area(newer.vertices[first], newer.vertices[first + 1], newer.vertices[first + 2]);
+             const double mixed = area(out.vertices[first], out.vertices[first + 1], out.vertices[first + 2]);
+             if (std::abs(native) <= 1 ||
+--- a/engine/render/include/dream/render/interpolate.h
++++ b/engine/render/include/dream/render/interpolate.h
+@@ -51,6 +51,7 @@
+ // depth changes retain native geometry. Positions are blended before projection to
+ // preserve planar surfaces. Unsafe triangles and bent planar panels restore their
+ // shared corners together, avoiding folds and surfaces crossing their wall linings.
++// Nearby parallel depth-writing layers also retain their native depth ordering.
+ // Texture coordinates and colours come from `newer`. Returns false (and
+ // leaves `out` equal to `newer`) on a camera cut. `pairs` is scratch storage, kept by the caller.
+ bool blend_frames(const Frame& older, const Frame& newer, const BlendOptions& opt,

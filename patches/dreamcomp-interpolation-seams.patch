@@ -1,0 +1,84 @@
+--- a/engine/render/src/interpolate.cpp
++++ b/engine/render/src/interpolate.cpp
+@@ -2,6 +2,9 @@
+ 
+ #include <algorithm>
+ #include <cmath>
++#include <cstring>
++#include <map>
++#include <array>
+ 
+ namespace dream::render {
+ 
+@@ -81,6 +84,7 @@
+         stats.cut = true;
+         return false;
+     }
++    std::vector<bool> blended(out.vertices.size(), false);
+     const float t = opt.t;
+     for (const auto& p : pairs) {
+         const Polygon& pa = older.lists[p.list][p.a];
+@@ -100,11 +104,63 @@
+         for (std::uint32_t k = 0; k < pb.count; ++k) {
+             const Vertex& va = older.vertices[pa.first + k];
+             Vertex& vb = out.vertices[pb.first + k];
++            blended[pb.first + k] = true;
+             vb.x = va.x + (vb.x - va.x) * t;
+             vb.y = va.y + (vb.y - va.y) * t;
+             vb.z = va.z + (vb.z - va.z) * t;
+         }
+         ++stats.blended_strips;
++    }
++    // Terrain edges often duplicate their vertices in separately submitted strips.
++    // A strip missing from the older frame must follow its matched neighbours at
++    // shared corners. Conflicting matches keep that corner at the native position.
++    // Flat sprites/HUD layers are independent even when their positions coincide.
++    std::map<std::array<std::uint32_t, 3>, std::vector<std::size_t>> corners;
++    std::vector<bool> spatial(newer.vertices.size(), false);
++    for (const auto& list : newer.lists) {
++        for (const auto& poly : list) {
++            if (poly.count < 3) continue;
++            const float z = newer.vertices[poly.first].z;
++            bool flat = true;
++            for (std::uint32_t k = 1; k < poly.count; ++k)
++                flat = flat && newer.vertices[poly.first + k].z == z;
++
++            for (std::uint32_t k = 0; k < poly.count; ++k) {
++                const auto index = poly.first + k;
++                spatial[index] = spatial[index] || !flat;
++                const auto& v = newer.vertices[index];
++                std::array<std::uint32_t, 3> key{};
++                const float xyz[] = {v.x == 0 ? 0 : v.x, v.y == 0 ? 0 : v.y,
++                                     v.z == 0 ? 0 : v.z};
++                std::memcpy(key.data(), xyz, sizeof(xyz));
++                corners[key].push_back(index);
++            }
++        }
++    }
++    for (const auto& entry : corners) {
++        const auto& indices = entry.second;
++        if (indices.size() < 2) continue;
++        if (std::none_of(indices.begin(), indices.end(), [&](auto i) { return spatial[i]; }))
++            continue;
++        const Vertex* candidate = nullptr;
++        bool conflict = false;
++        for (auto i : indices) {
++            if (!blended[i]) continue;
++            const auto& v = out.vertices[i];
++            if (!candidate) candidate = &v;
++            else if (std::abs(v.x - candidate->x) > 0.001f ||
++                     std::abs(v.y - candidate->y) > 0.001f ||
++                     std::abs(v.z - candidate->z) >
++                         std::max(0.000001f, std::abs(candidate->z) * 0.00001f))
++                conflict = true;
++        }
++        if (!candidate) continue;
++        const Vertex position = conflict ? newer.vertices[indices.front()] : *candidate;
++        for (auto i : indices) {
++            out.vertices[i].x = position.x;
++            out.vertices[i].y = position.y;
++            out.vertices[i].z = position.z;
++        }
+     }
+     // Blended depths lie between the two frames': keep the projection range covering both.
+     out.min_z = std::min(older.min_z, newer.min_z);

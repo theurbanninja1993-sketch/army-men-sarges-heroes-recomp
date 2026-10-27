@@ -1,0 +1,392 @@
+--- a/engine/render/src/interpolate.cpp
++++ b/engine/render/src/interpolate.cpp
+@@ -10,7 +10,7 @@
+ 
+ namespace {
+ 
+-bool same(const Frame& older, const Polygon& a, const Frame& newer, const Polygon& b) {
++bool same(const Frame &older, const Polygon &a, const Frame &newer, const Polygon &b) {
+     if (a.count != b.count || a.pcw != b.pcw || a.isp != b.isp || a.tsp != b.tsp ||
+         a.tcw != b.tcw || a.tsp1 != b.tsp1 || a.tcw1 != b.tcw1)
+         return false;
+@@ -20,16 +20,16 @@
+     // changes submission order. Require the same texture corner correspondence.
+     if (a.pcw & 8u) {
+         for (std::uint32_t k = 0; k < a.count; ++k) {
+-            const Vertex& va = older.vertices[a.first + k];
+-            const Vertex& vb = newer.vertices[b.first + k];
+-            if (!std::isfinite(va.u) || !std::isfinite(va.v) ||
+-                !std::isfinite(vb.u) || !std::isfinite(vb.v) ||
+-                std::abs(va.u - vb.u) > 0.00001f || std::abs(va.v - vb.v) > 0.00001f)
++            const Vertex &va = older.vertices[a.first + k];
++            const Vertex &vb = newer.vertices[b.first + k];
++            if (!std::isfinite(va.u) || !std::isfinite(va.v) || !std::isfinite(vb.u) ||
++                !std::isfinite(vb.v) || std::abs(va.u - vb.u) > 0.00001f ||
++                std::abs(va.v - vb.v) > 0.00001f)
+                 return false;
+         }
+     }
+ 
+-    auto area = [](const Vertex& v0, const Vertex& v1, const Vertex& v2) {
++    auto area = [](const Vertex &v0, const Vertex &v1, const Vertex &v2) {
+         return (v1.x - v0.x) * (v2.y - v0.y) - (v1.y - v0.y) * (v2.x - v0.x);
+     };
+     for (std::uint32_t k = 2; k < a.count; ++k) {
+@@ -46,22 +46,114 @@
+         // face when it turns edge-on or its clipped topology changes instead.
+         if (small > 1.0f && (aa * ab < 0.0f || small < large * 0.25f))
+             return false;
++        Vertex mid[3];
++        for (unsigned n = 0; n < 3; ++n) {
++            const auto &va = older.vertices[a.first + k - 2 + n];
++            const auto &vb = newer.vertices[b.first + k - 2 + n];
++            mid[n].x = (va.x + vb.x) * 0.5f;
++            mid[n].y = (va.y + vb.y) * 0.5f;
++        }
++        const float am = area(mid[0], mid[1], mid[2]);
++        if (small > 1.0f && (am * ab <= 0 || std::abs(am) < small * 0.25f))
++            return false;
+     }
+     return true;
+ }
+ 
+-}  // namespace
+-
+-MatchStats match_frames(const Frame& older, const Frame& newer, unsigned window,
+-                        std::vector<StripPair>& out) {
++// Repeated materials and UVs need not retain submission order after culling.
++// Choose the closest compatible face across the list, with unique old partners.
++// Relative depth is part of the score so a nearby tree at another distance
++// cannot become a partner merely because it uses the same foliage atlas.
++MatchStats match_spatial(const Frame &older, const Frame &newer, std::vector<StripPair> &out) {
+     out.clear();
+     MatchStats st;
+     for (std::uint32_t l = 0; l < newer.lists.size(); ++l) {
+-        const auto& A = older.lists[l];
+-        const auto& B = newer.lists[l];
++        const auto &A = older.lists[l];
++        const auto &B = newer.lists[l];
+         st.strips_a += static_cast<std::uint32_t>(A.size());
+         st.strips_b += static_cast<std::uint32_t>(B.size());
+-        for (const auto& p : B) st.vertices_b += p.count;
++        for (const auto &p : B)
++            st.vertices_b += p.count;
++        std::map<std::array<std::uint32_t, 8>, std::vector<std::uint32_t>> buckets;
++        auto key = [](const Polygon &p) {
++            return std::array<std::uint32_t, 8>{p.count, p.pcw,  p.isp,  p.tsp,
++                                                p.tcw,   p.tsp1, p.tcw1, p.tile_clip};
++        };
++        for (std::uint32_t i = 0; i < A.size(); ++i)
++            buckets[key(A[i])].push_back(i);
++        struct Candidate {
++            float cost;
++            std::uint32_t a, b;
++        };
++        std::vector<Candidate> candidates;
++        for (std::uint32_t j = 0; j < B.size(); ++j) {
++            auto found = buckets.find(key(B[j]));
++            if (found == buckets.end())
++                continue;
++            float best = INFINITY;
++            std::uint32_t chosen = 0;
++            for (auto i : found->second) {
++                const auto &first_a = older.vertices[A[i].first];
++                const auto &first_b = newer.vertices[B[j].first];
++                const float first_scale = std::max(std::abs(first_a.z), std::abs(first_b.z));
++                const float relative_z = first_scale > 0 ? (first_b.z - first_a.z) / first_scale : 0;
++                if (std::abs(relative_z) > .1f)
++                    continue;
++                const float first_dx = first_b.x - first_a.x, first_dy = first_b.y - first_a.y;
++                if (first_dx * first_dx + first_dy * first_dy + 320.f * 320.f * relative_z * relative_z >= best)
++                    continue;
++                if (!same(older, A[i], newer, B[j]))
++                    continue;
++                float cost = 0;
++                bool ok = true;
++                for (std::uint32_t k = 0; k < B[j].count; ++k) {
++                    const auto &va = older.vertices[A[i].first + k];
++                    const auto &vb = newer.vertices[B[j].first + k];
++                    const float dx = vb.x - va.x, dy = vb.y - va.y;
++                    const float scale = std::max(std::abs(va.z), std::abs(vb.z));
++                    const float dz = scale > 0 ? (vb.z - va.z) / scale : 0;
++                    if (std::abs(dz) > .1f) {
++                        ok = false;
++                        break;
++                    }
++                    cost += dx * dx + dy * dy + 320.f * 320.f * dz * dz;
++                }
++                if (ok && cost < best) {
++                    best = cost;
++                    chosen = i;
++                }
++            }
++            if (std::isfinite(best))
++                candidates.push_back({best, chosen, j});
++        }
++        std::stable_sort(candidates.begin(), candidates.end(),
++                         [](const auto &a, const auto &b) { return a.cost < b.cost; });
++        std::vector<bool> used(A.size(), false);
++        for (const auto &c : candidates) {
++            if (used[c.a])
++                continue;
++            used[c.a] = true;
++            out.push_back({l, c.a, c.b});
++            ++st.matched;
++            st.matched_vertices += B[c.b].count;
++        }
++    }
++    return st;
++}
++
++} // namespace
++
++MatchStats match_frames(const Frame &older, const Frame &newer, unsigned window,
++                        std::vector<StripPair> &out) {
++    out.clear();
++    MatchStats st;
++    for (std::uint32_t l = 0; l < newer.lists.size(); ++l) {
++        const auto &A = older.lists[l];
++        const auto &B = newer.lists[l];
++        st.strips_a += static_cast<std::uint32_t>(A.size());
++        st.strips_b += static_cast<std::uint32_t>(B.size());
++        for (const auto &p : B)
++            st.vertices_b += p.count;
+         std::size_t i = 0, j = 0;
+         while (i < A.size() && j < B.size()) {
+             if (same(older, A[i], newer, B[j])) {
+@@ -97,17 +189,17 @@
+     return st;
+ }
+ 
+-bool blend_frames(const Frame& older, const Frame& newer, const BlendOptions& opt,
+-                  std::vector<StripPair>& pairs, Frame& out, BlendStats& stats) {
++bool blend_frames(const Frame &older, const Frame &newer, const BlendOptions &opt,
++                  std::vector<StripPair> &pairs, Frame &out, BlendStats &stats) {
+     out = newer;
+     stats = BlendStats{};
+     stats.match = match_frames(older, newer, opt.window, pairs);
+     // Camera cut test: the median movement of paired, on-screen first vertices.
+     std::vector<float> motion;
+     motion.reserve(pairs.size());
+-    for (const auto& p : pairs) {
+-        const Vertex& va = older.vertices[older.lists[p.list][p.a].first];
+-        const Vertex& vb = newer.vertices[newer.lists[p.list][p.b].first];
++    for (const auto &p : pairs) {
++        const Vertex &va = older.vertices[older.lists[p.list][p.a].first];
++        const Vertex &vb = newer.vertices[newer.lists[p.list][p.b].first];
+         if (vb.x >= 0.0f && vb.x <= 640.0f && vb.y >= 0.0f && vb.y <= 480.0f)
+             motion.push_back(std::hypot(vb.x - va.x, vb.y - va.y));
+     }
+@@ -119,30 +211,39 @@
+         stats.cut = true;
+         return false;
+     }
++    // Keep the ordered probe above for cuts; refine real scene correspondence
++    // only after establishing continuity.
++    stats.match = match_spatial(older, newer, pairs);
+     std::vector<bool> blended(out.vertices.size(), false);
+     const float t = opt.t;
+-    for (const auto& p : pairs) {
+-        const Polygon& pa = older.lists[p.list][p.a];
+-        const Polygon& pb = out.lists[p.list][p.b];
++    for (const auto &p : pairs) {
++        const Polygon &pa = older.lists[p.list][p.a];
++        const Polygon &pb = out.lists[p.list][p.b];
+         bool ok = true;
+         for (std::uint32_t k = 0; k < pb.count && ok; ++k) {
+-            const Vertex& va = older.vertices[pa.first + k];
+-            const Vertex& vb = out.vertices[pb.first + k];
++            const Vertex &va = older.vertices[pa.first + k];
++            const Vertex &vb = out.vertices[pb.first + k];
+             ok = std::isfinite(va.x) && std::isfinite(va.y) && std::isfinite(va.z) &&
+-                 std::isfinite(vb.x) && std::isfinite(vb.y) && std::isfinite(vb.z) &&
+-                 std::abs(vb.x - va.x) <= opt.max_jump && std::abs(vb.y - va.y) <= opt.max_jump;
++                 std::isfinite(vb.x) && std::isfinite(vb.y) && std::isfinite(vb.z) && va.z > 0 &&
++                 vb.z > 0 && std::abs(vb.x - va.x) <= opt.max_jump &&
++                 std::abs(vb.y - va.y) <= opt.max_jump;
+         }
+         if (!ok) {
+             ++stats.jumped_strips;
+             continue;
+         }
+         for (std::uint32_t k = 0; k < pb.count; ++k) {
+-            const Vertex& va = older.vertices[pa.first + k];
+-            Vertex& vb = out.vertices[pb.first + k];
++            const Vertex &va = older.vertices[pa.first + k];
++            Vertex &vb = out.vertices[pb.first + k];
+             blended[pb.first + k] = true;
+-            vb.x = va.x + (vb.x - va.x) * t;
+-            vb.y = va.y + (vb.y - va.y) * t;
+-            vb.z = va.z + (vb.z - va.z) * t;
++            // Interpolate pre-projection positions, then project again. Linear
++            // screen-space interpolation bends coplanar surfaces with different
++            // tessellations, so overlays can alternately pass/fail the depth test.
++            const double denominator = (1.0 - t) * vb.z + t * va.z;
++            const float weight = static_cast<float>(t * va.z / denominator);
++            vb.x = va.x + (vb.x - va.x) * weight;
++            vb.y = va.y + (vb.y - va.y) * weight;
++            vb.z = va.z + (vb.z - va.z) * weight;
+         }
+         ++stats.blended_strips;
+     }
+@@ -152,9 +253,10 @@
+     // Flat sprites/HUD layers are independent even when their positions coincide.
+     std::map<std::array<std::uint32_t, 3>, std::vector<std::size_t>> corners;
+     std::vector<bool> spatial(newer.vertices.size(), false);
+-    for (const auto& list : newer.lists) {
+-        for (const auto& poly : list) {
+-            if (poly.count < 3) continue;
++    for (const auto &list : newer.lists) {
++        for (const auto &poly : list) {
++            if (poly.count < 3)
++                continue;
+             const float z = newer.vertices[poly.first].z;
+             bool flat = true;
+             for (std::uint32_t k = 1; k < poly.count; ++k)
+@@ -163,33 +265,49 @@
+             for (std::uint32_t k = 0; k < poly.count; ++k) {
+                 const auto index = poly.first + k;
+                 spatial[index] = spatial[index] || !flat;
+-                const auto& v = newer.vertices[index];
++                const auto &v = newer.vertices[index];
+                 std::array<std::uint32_t, 3> key{};
+-                const float xyz[] = {v.x == 0 ? 0 : v.x, v.y == 0 ? 0 : v.y,
+-                                     v.z == 0 ? 0 : v.z};
++                const float xyz[] = {v.x == 0 ? 0 : v.x, v.y == 0 ? 0 : v.y, v.z == 0 ? 0 : v.z};
+                 std::memcpy(key.data(), xyz, sizeof(xyz));
+                 corners[key].push_back(index);
+             }
+         }
+     }
+-    for (const auto& entry : corners) {
+-        const auto& indices = entry.second;
+-        if (indices.size() < 2) continue;
++    std::vector<std::size_t> parent(out.vertices.size());
++    for (std::size_t i = 0; i < parent.size(); ++i)
++        parent[i] = i;
++    auto root = [&](std::size_t i) {
++        while (parent[i] != i) {
++            parent[i] = parent[parent[i]];
++            i = parent[i];
++        }
++        return i;
++    };
++    auto join = [&](std::size_t a, std::size_t b) { parent[root(b)] = root(a); };
++    for (const auto &entry : corners) {
++        const auto &indices = entry.second;
++        if (indices.size() < 2)
++            continue;
+         if (std::none_of(indices.begin(), indices.end(), [&](auto i) { return spatial[i]; }))
+             continue;
+-        const Vertex* candidate = nullptr;
++        for (auto i : indices)
++            join(indices.front(), i);
++        const Vertex *candidate = nullptr;
+         bool conflict = false;
+         for (auto i : indices) {
+-            if (!blended[i]) continue;
+-            const auto& v = out.vertices[i];
+-            if (!candidate) candidate = &v;
++            if (!blended[i])
++                continue;
++            const auto &v = out.vertices[i];
++            if (!candidate)
++                candidate = &v;
+             else if (std::abs(v.x - candidate->x) > 0.001f ||
+                      std::abs(v.y - candidate->y) > 0.001f ||
+                      std::abs(v.z - candidate->z) >
+                          std::max(0.000001f, std::abs(candidate->z) * 0.00001f))
+                 conflict = true;
+         }
+-        if (!candidate) continue;
++        if (!candidate)
++            continue;
+         const Vertex position = conflict ? newer.vertices[indices.front()] : *candidate;
+         for (auto i : indices) {
+             out.vertices[i].x = position.x;
+@@ -197,10 +315,68 @@
+             out.vertices[i].z = position.z;
+         }
+     }
++    // A partial match can still fold a face after shared-corner repair. Restore
++    // its corners and all their shared copies together; recheck adjacent faces
++    // until stable. Each corner can be restored only once, so this terminates.
++    // This preserves seams without freezing an entire connected terrain mesh.
++    struct Triangle {
++        std::size_t first;
++        std::array<std::size_t, 3> corners;
++    };
++    std::vector<Triangle> triangles;
++    std::vector<std::vector<std::size_t>> incident(out.vertices.size()),
++        members(out.vertices.size());
++    for (std::size_t i = 0; i < out.vertices.size(); ++i)
++        members[root(i)].push_back(i);
++    for (const auto &list : newer.lists)
++        for (const auto &poly : list) {
++            for (std::uint32_t k = 2; k < poly.count; ++k) {
++                const std::size_t first = poly.first + k - 2;
++                Triangle tri{first, {root(first), root(first + 1), root(first + 2)}};
++                for (auto corner : tri.corners)
++                    incident[corner].push_back(triangles.size());
++                triangles.push_back(tri);
++            }
++        }
++    std::vector<std::size_t> pending(triangles.size());
++    for (std::size_t i = 0; i < pending.size(); ++i)
++        pending[i] = i;
++    std::vector<bool> queued(triangles.size(), true), restored(out.vertices.size(), false);
++    auto area = [](const Vertex &a, const Vertex &b, const Vertex &c) {
++        return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
++    };
++    for (std::size_t next = 0; next < pending.size(); ++next) {
++        const auto index = pending[next];
++        queued[index] = false;
++        const auto &tri = triangles[index];
++        const auto first = tri.first;
++        const float native =
++            area(newer.vertices[first], newer.vertices[first + 1], newer.vertices[first + 2]);
++        const float mixed =
++            area(out.vertices[first], out.vertices[first + 1], out.vertices[first + 2]);
++        if (std::abs(native) <= 1.f ||
++            (native * mixed > 0 && std::abs(mixed) >= std::abs(native) * .25f))
++            continue;
++        for (auto corner : tri.corners) {
++            if (restored[corner])
++                continue;
++            restored[corner] = true;
++            for (auto i : members[corner]) {
++                out.vertices[i].x = newer.vertices[i].x;
++                out.vertices[i].y = newer.vertices[i].y;
++                out.vertices[i].z = newer.vertices[i].z;
++            }
++            for (auto neighbor : incident[corner])
++                if (!queued[neighbor]) {
++                    queued[neighbor] = true;
++                    pending.push_back(neighbor);
++                }
++        }
++    }
+     // Blended depths lie between the two frames': keep the projection range covering both.
+     out.min_z = std::min(older.min_z, newer.min_z);
+     out.max_z = std::max(older.max_z, newer.max_z);
+     return true;
+ }
+ 
+-}  // namespace dream::render
++} // namespace dream::render
+--- a/engine/render/include/dream/render/interpolate.h
++++ b/engine/render/include/dream/render/interpolate.h
+@@ -46,8 +46,11 @@
+     bool cut = false;
+ };
+ 
+-// `out` becomes `newer` with every paired, plausibly moving strip's positions (x, y and 1/w)
+-// blended towards `older`. Texture coordinates and colours come from `newer`. Returns false (and
++// `out` becomes `newer` with plausibly moving strips paired by spatial/depth proximity
++// after the ordered camera-cut probe. Pairs may cross submission order; large relative
++// depth changes retain native geometry. Positions are blended before projection to
++// preserve planar surfaces, and unsafe shared corners revert together to avoid folds.
++// Texture coordinates and colours come from `newer`. Returns false (and
+ // leaves `out` equal to `newer`) on a camera cut. `pairs` is scratch storage, kept by the caller.
+ bool blend_frames(const Frame& older, const Frame& newer, const BlendOptions& opt,
+                   std::vector<StripPair>& pairs, Frame& out, BlendStats& stats);

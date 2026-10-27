@@ -1,0 +1,109 @@
+--- a/include/dreamcomp/port.h
++++ b/include/dreamcomp/port.h
+@@ -37,6 +37,7 @@
+     // been verified with.
+     void (*widescreen)(dream::System& sys, float aspect) = nullptr;
+     bool widescreen_anamorphic = true;
++    bool pillarbox_2d = false;  // retain original proportions for entirely flat menu/video frames
+     float max_aspect = 32.0f / 9.0f;
+ 
+     // Widescreen HUD correction (anamorphic ports). The game draws its 2D HUD in 640x480 screen
+--- a/include/dreamcomp/hud.h
++++ b/include/dreamcomp/hud.h
+@@ -23,6 +23,10 @@
+ }
+ 
+ namespace dreamcomp::hud {
++
++// Fit an entirely 2D frame into a central 4:3 region, with black side bars.
++// Returns false without changing a frame containing perspective geometry.
++bool pillarbox_2d(dream::render::Frame& frame, float aspect);
+ 
+ enum class Anchor : std::uint8_t { Auto, Left, Center, Right, Stretch };
+ const char* name(Anchor a) noexcept;  // "auto", "left", "center", "right", "stretch"
+--- a/src/core.cpp
++++ b/src/core.cpp
+@@ -538,6 +538,9 @@
+         // Before the HUD correction, which moves pieces off whole console pixels.
+         if (sharp_2d_)
+             sharpened_ += sharpen_2d(frame);
++        if (g_port && g_port->pillarbox_2d && widescreen() &&
++            hud::pillarbox_2d(frame, target_aspect()))
++            return;
+         if (!g_port || !g_port->hud.enabled)
+             return;
+         const bool watching = hud_watch_.load(std::memory_order_relaxed);
+--- a/src/hud.cpp
++++ b/src/hud.cpp
+@@ -18,6 +18,42 @@
+ // (reserved) is never a texture -- it is float data such as 0x3F800000 (1.0) -- so it is read as 0.
+ std::uint32_t clean_word(std::uint32_t w) { return ((w >> 27) & 7u) == 7u ? 0u : w; }
+ }  // namespace
++
++bool pillarbox_2d(dream::render::Frame& frame, float aspect) {
++    if (aspect <= 4.0f / 3.0f + 0.001f || frame.vertices.empty()) return false;
++    for (const auto& list : frame.lists)
++        for (const auto& p : list) {
++            if (p.count < 3) continue;
++            const float z = frame.vertices[p.first].z;
++            for (std::uint32_t i = 1; i < p.count; ++i)
++                if (std::abs(frame.vertices[p.first + i].z - z) >
++                    std::max(1e-6f, std::abs(z) * 1e-5f)) return false;
++        }
++    const float scale = (4.0f / 3.0f) / aspect;
++    for (auto& v : frame.vertices) v.x = 320.0f + (v.x - 320.0f) * scale;
++    // The hardware background plane extends past the screen edges. Cover the margins
++    // after all 2D draws instead of cropping that plane's texture coordinates.
++    const float left = 320.0f * (1.0f - scale);
++    for (auto bounds : {std::pair{0.0f, left}, std::pair{640.0f - left, 640.0f}}) {
++        dream::render::Polygon bar;
++        bar.first = static_cast<std::uint32_t>(frame.vertices.size());
++        bar.count = 4;
++        bar.isp = (7u << 29) | (1u << 26);  // depth always, no depth writes or culling
++        bar.tsp = (1u << 29) | (2u << 22);  // source one, destination zero, no fog
++        for (auto point : {std::pair{bounds.first, 0.0f}, std::pair{bounds.second, 0.0f},
++                           std::pair{bounds.first, 480.0f}, std::pair{bounds.second, 480.0f}}) {
++            dream::render::Vertex v;
++            v.x = point.first;
++            v.y = point.second;
++            v.z = 100000.0f;
++            v.base = 0xff000000u;
++            frame.vertices.push_back(v);
++        }
++        frame.lists[2].push_back(bar);
++    }
++    frame.max_z = std::max(frame.max_z, 100000.0f);
++    return true;
++}
+ 
+ const char* name(Anchor a) noexcept {
+     switch (a) {
+--- a/src/tests/test_hud.cpp
++++ b/src/tests/test_hud.cpp
+@@ -255,6 +255,26 @@
+         CHECK(((f.lists[2][5].tsp >> 13) & 3u) == 0);
+     }
+ 
++    // Menus/videos fit in 4:3 within a wide target; a scene with depth stays wide.
++    {
++        dream::render::Frame flat;
++        sprite(flat, 0, 0, 640, 480, 1, 0);
++        CHECK(hud::pillarbox_2d(flat, 16.0f / 9.0f));
++        CHECK(std::abs(flat.vertices[0].x - 80.0f) < 0.001f);
++        CHECK(std::abs(flat.vertices[1].x - 560.0f) < 0.001f);
++        CHECK(flat.lists[2].size() == 2);
++        CHECK(flat.vertices.size() == 12);
++        dream::render::Frame perspective;
++        sprite(perspective, 0, 0, 640, 480, 1, 0);
++        perspective.vertices[1].z = 2;
++        CHECK(!hud::pillarbox_2d(perspective, 16.0f / 9.0f));
++        CHECK(perspective.vertices[0].x == 0 && perspective.vertices.size() == 4);
++        dream::render::Frame original;
++        sprite(original, 0, 0, 640, 480, 1, 0);
++        CHECK(!hud::pillarbox_2d(original, 4.0f / 3.0f));
++        CHECK(original.vertices[1].x == 640 && original.vertices.size() == 4);
++    }
++
+     if (g_fail)
+         std::fprintf(stderr, "%d check(s) failed\n", g_fail);
+     else

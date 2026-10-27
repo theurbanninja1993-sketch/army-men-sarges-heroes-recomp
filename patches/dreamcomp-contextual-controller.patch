@@ -1,0 +1,202 @@
+--- a/engine/render/include/dream/render/input.h
++++ b/engine/render/include/dream/render/input.h
+@@ -40,6 +40,19 @@
+     Count
+ };
+ constexpr unsigned kPadControlCount = static_cast<unsigned>(PadControl::Count);
++
++// Canonical physical controls (ABXY, triggers, left stick) before user bindings,
++// plus the extra shoulder button absent from a Dreamcast pad. A port may supply
++// contextual logical controls while keyboard/mouse bindings remain independent.
++struct GamepadSample {
++    std::array<float, kPadControlCount> controls{};
++    bool right_bumper = false;
++};
++
++struct KeyboardSample {
++    std::array<float, kPadControlCount> controls{};
++    bool aiming = false, shift = false, forward = false, backward = false;
++};
+ 
+ // For the UI. Upper case because the overlay font is.
+ const char* pad_control_label(PadControl c);
+--- a/engine/runtime/include/dream/runtime/host_ext.h
++++ b/engine/runtime/include/dream/runtime/host_ext.h
+@@ -24,6 +24,8 @@
+ }
+ namespace dream::render {
+ struct Frame;
++struct GamepadSample;
++struct KeyboardSample;
+ }
+ 
+ namespace dream::host {
+@@ -49,6 +51,12 @@
+     virtual bool wants_mouse_motion() { return false; }
+     // Player-one right stick, normalized after the configured deadzone. Independent
+     // of mouse capture; inactive while unfocused or a host menu owns input.
++    virtual bool map_keyboard(const render::KeyboardSample& physical, render::GamepadSample& logical) {
++        (void)physical; (void)logical; return false;
++    }
++    virtual bool map_controller(const render::GamepadSample& physical, render::GamepadSample& logical) {
++        (void)physical; (void)logical; return false;
++    }
+     virtual bool controller_camera_enabled() { return false; }
+     virtual void on_controller_camera(float x, float y, bool active) { (void)x; (void)y; (void)active; }
+     virtual bool wants_keyboard_strafe() { return false; }
+--- a/engine/render/include/dream/render/vk/window.h
++++ b/engine/render/include/dream/render/vk/window.h
+@@ -126,6 +126,8 @@
+     std::function<bool(const void* sdl_event)> event_filter;
+     // Native camera consumers replace the legacy virtual stick with raw relative motion.
+     std::function<void(float dx, float dy, bool active)> mouse_motion;
++    std::function<bool(const KeyboardSample&, GamepadSample&)> keyboard_map;
++    std::function<bool(const GamepadSample&, GamepadSample&)> controller_map;
+     std::function<bool()> controller_camera_enabled;
+     std::function<void(float x, float y, bool active)> controller_camera;
+     bool keyboard_strafe = false;  // sideways keyboard stick bindings imply full strafe trigger
+--- a/engine/render/src/vk/window.cpp
++++ b/engine/render/src/vk/window.cpp
+@@ -653,6 +653,25 @@
+                 if (bind.source == BindSource::Key && keys[bind.code]) keyboard_sideways = true;
+             }
+     }
++    GamepadSample keyboard_logical;
++    bool mapped_keyboard = false;
++    if (keyboard_map && keys && !capturing_ && !game_input_blocked_ &&
++        (SDL_GetWindowFlags(window_) & SDL_WINDOW_INPUT_FOCUS)) {
++        KeyboardSample physical;
++        for (unsigned i = 0; i < kPadControlCount; ++i)
++            for (unsigned slot = 0; slot < kBindingSlots; ++slot) {
++                const auto& kb = key_[slot][i];
++                if ((kb.source == BindSource::Key && keys[kb.code]) ||
++                    (kb.source == BindSource::Mouse && (mouse_buttons & SDL_BUTTON_MASK(kb.code))))
++                    physical.controls[i] = 1.0f;
++            }
++        physical.aiming = (mouse_buttons & SDL_BUTTON_MASK(SDL_BUTTON_RIGHT)) != 0;
++        physical.shift = keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT];
++        physical.forward = keys[SDL_SCANCODE_W];
++        physical.backward = keys[SDL_SCANCODE_S];
++        mapped_keyboard = keyboard_map(physical, keyboard_logical);
++        if (mapped_keyboard) keyboard_sideways = false;
++    }
+     const float dead = static_cast<float>(bindings_.deadzone_percent) / 100.0f;
+     const bool modern_controller = controller_camera_enabled && controller_camera_enabled();
+     const bool camera_active = modern_controller && !capturing_ && !game_input_blocked_ &&
+@@ -667,25 +686,53 @@
+         controller_camera(axis(SDL_GAMEPAD_AXIS_RIGHTX), axis(SDL_GAMEPAD_AXIS_RIGHTY), camera_active);
+     }
+     for (unsigned p = 0; p < kMaxPlayers; ++p) {
+-    const bool previous_strafe = pad_held_[p][static_cast<unsigned>(PadControl::RightTrigger)];
+     // Keyboard drives player 0; pad N drives player N (connection order).
+     SDL_Gamepad* const player_pad = p < pads_.size() ? pads_[p] : nullptr;
++    GamepadSample physical, logical;
++    bool mapped_gamepad = false;
++    if (p == 0 && camera_active && controller_map) {
++        auto button = [&](PadControl c, SDL_GamepadButton b) {
++            physical.controls[static_cast<unsigned>(c)] = SDL_GetGamepadButton(player_pad, b) ? 1.0f : 0.0f;
++        };
++        button(PadControl::A, SDL_GAMEPAD_BUTTON_SOUTH);
++        button(PadControl::B, SDL_GAMEPAD_BUTTON_EAST);
++        button(PadControl::X, SDL_GAMEPAD_BUTTON_WEST);
++        button(PadControl::Y, SDL_GAMEPAD_BUTTON_NORTH);
++        button(PadControl::Start, SDL_GAMEPAD_BUTTON_START);
++        button(PadControl::Up, SDL_GAMEPAD_BUTTON_DPAD_UP);
++        button(PadControl::Down, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
++        button(PadControl::Left, SDL_GAMEPAD_BUTTON_DPAD_LEFT);
++        button(PadControl::Right, SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
++        physical.right_bumper = SDL_GetGamepadButton(player_pad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
++        auto half_axis = [&](PadControl c, SDL_GamepadAxis axis, float sign) {
++            const float raw = sign * static_cast<float>(SDL_GetGamepadAxis(player_pad, axis)) / 32767.0f;
++            physical.controls[static_cast<unsigned>(c)] = std::clamp((raw - dead) / std::max(0.001f, 1.0f - dead), 0.0f, 1.0f);
++        };
++        half_axis(PadControl::LeftTrigger, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 1);
++        half_axis(PadControl::RightTrigger, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 1);
++        half_axis(PadControl::StickLeft, SDL_GAMEPAD_AXIS_LEFTX, -1);
++        half_axis(PadControl::StickRight, SDL_GAMEPAD_AXIS_LEFTX, 1);
++        half_axis(PadControl::StickUp, SDL_GAMEPAD_AXIS_LEFTY, -1);
++        half_axis(PadControl::StickDown, SDL_GAMEPAD_AXIS_LEFTY, 1);
++        mapped_gamepad = controller_map(physical, logical);
++    }
+     for (unsigned i = 0; i < kPadControlCount; ++i) {
+         // Digital and analogue sources are gathered separately, because only a digital one ramps.
+         // A pad's real trigger position must pass straight through, or a pad would feel worse than
+         // the keyboard it is replacing.
+         bool digital_on = false;
+-        float analogue = 0.0f;
++        float analogue = mapped_gamepad ? logical.controls[i] : 0.0f;
++        if (p == 0 && mapped_keyboard) analogue = std::max(analogue, keyboard_logical.controls[i]);
+         // While capturing, the game gets nothing: a key held down to bind it must not also drive.
+         if (!capturing_) {
+             for (unsigned s = 0; s < kBindingSlots; ++s) {
+             const Resolved& kb = key_[s][i];
+             const Resolved& gb = gpad_[s][i];
+-            if (p == 0 && keys && kb.source == BindSource::Key && keys[kb.code])
++            if (p == 0 && !mapped_keyboard && keys && kb.source == BindSource::Key && keys[kb.code])
+                 digital_on = true;
+-            if (p == 0 && kb.source == BindSource::Mouse && (mouse_buttons & SDL_BUTTON_MASK(kb.code)))
++            if (p == 0 && !mapped_keyboard && kb.source == BindSource::Mouse && (mouse_buttons & SDL_BUTTON_MASK(kb.code)))
+                 digital_on = true;
+-            if (SDL_Gamepad* g = player_pad) {
++            if (SDL_Gamepad* g = mapped_gamepad ? nullptr : player_pad) {
+                 if (gb.source == BindSource::Button) {
+                     if (SDL_GetGamepadButton(g, static_cast<SDL_GamepadButton>(gb.code)))
+                         digital_on = true;
+@@ -743,14 +790,6 @@
+         pad_pressed_[p][i] = pad_held_[p][i] && !was;
+         pad_value_[p][i] = value;
+     }
+-    if (p == 0 && camera_active &&
+-        (pad_value_[p][static_cast<unsigned>(PadControl::StickLeft)] > 0 ||
+-         pad_value_[p][static_cast<unsigned>(PadControl::StickRight)] > 0)) {
+-        const auto trigger = static_cast<unsigned>(PadControl::RightTrigger);
+-        pad_value_[p][trigger] = 1.0f;
+-        pad_held_[p][trigger] = true;
+-        pad_pressed_[p][trigger] = !previous_strafe;
+-    }
+     }
+     return running_;
+ }
+--- a/engine/runtime/boot/boot_main.cpp
++++ b/engine/runtime/boot/boot_main.cpp
+@@ -2453,6 +2453,20 @@
+         }
+         {
+             Live* lp = live.get();
++            lp->window.keyboard_map = [lp](const dream::render::KeyboardSample& physical,
++                                           dream::render::GamepadSample& logical) {
++                if (lp->menu.is_open() || lp->overlay_open()) return false;
++                for (auto* e : dream::host::extensions())
++                    if (e->map_keyboard(physical, logical)) return true;
++                return false;
++            };
++            lp->window.controller_map = [lp](const dream::render::GamepadSample& physical,
++                                             dream::render::GamepadSample& logical) {
++                if (lp->menu.is_open() || lp->overlay_open()) return false;
++                for (auto* e : dream::host::extensions())
++                    if (e->map_controller(physical, logical)) return true;
++                return false;
++            };
+             lp->window.controller_camera_enabled = [lp] {
+                 if (lp->menu.is_open() || lp->overlay_open()) return false;
+                 for (auto* e : dream::host::extensions())
+--- a/include/dreamcomp/port.h
++++ b/include/dreamcomp/port.h
+@@ -27,6 +27,7 @@
+     const char* id = nullptr;     // settings folder name, e.g. "soulcalibur"
+     const char* title = nullptr;  // shown in the window title and menus
+     bool mouse_camera = false;   // expose native mouse mode and sensitivity in Controls
++    const char* controller_help = nullptr;  // optional description of this port's modes
+     bool controller_camera = false;  // expose Classic / Modern controller modes
+     unsigned players = 4;         // player cards in the Controls tab (1..4, Maple ports A-D)
+ 
+--- a/src/frontend/menu_ui.cpp
++++ b/src/frontend/menu_ui.cpp
+@@ -700,6 +700,7 @@
+         mouse += row_radio("controller_mode", "Controller mode",
+                            {{"classic", "Classic"}, {"modern", "Modern"}},
+                            draft_.get("controller_mode", "classic"),
++                           cfg_.port->controller_help ? cfg_.port->controller_help :
+                            "Classic keeps the original controls. Modern uses the left stick to move and strafe, "
+                            "and the right stick to turn and look up or down. Mouse settings are separate.", true);
+     }

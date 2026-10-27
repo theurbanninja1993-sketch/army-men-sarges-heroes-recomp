@@ -62,3 +62,15 @@ dest = 0x8C00CA60
 source = 0x0C136D18
 size = 0x48
 dest = 0x8C00CAA8
+
+[hooks]
+# Campaign camera: adjust native angles before orbit, collision, view and culling are built.
+0x0C0572A8 = "camera_update@entry"
+0x0C01E5F4 = "projection_submit"
+
+# Native movie status: allow confirm/Start to end Midway/Saffire logo playback.
+0x0C12376E = "logo_status@entry"
+
+# Snow Cnm00: reuse the native helicopter loop and cinematic sound cleanup.
+0x0C025820 = "snow_intro_audio@entry"
+0x0C01DCB4 = "snow_intro_play@entry"

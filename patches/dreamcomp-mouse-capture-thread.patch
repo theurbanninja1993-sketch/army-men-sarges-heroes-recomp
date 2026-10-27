@@ -1,0 +1,31 @@
+--- a/engine/render/src/vk/window.cpp
++++ b/engine/render/src/vk/window.cpp
+@@ -1058,8 +1058,26 @@
+ void Window::apply_mouse_capture() noexcept {
+     // Relative mode hides the cursor and keeps it in the window while the mouse steers. SDL drops
+     // it by itself when the window loses focus, and F9 turns steering (and so capture) off.
+-    if (window_)
+-        SDL_SetWindowRelativeMouseMode(window_, mouse_steer_ && !game_input_blocked_);
++    if (!window_) return;
++    struct Request { SDL_Window* window; bool enabled; };
++    Request request{window_, mouse_steer_ && !game_input_blocked_};
++    auto apply = [](void* data) {
++        const auto& r = *static_cast<Request*>(data);
++        const bool ok = SDL_SetWindowRelativeMouseMode(r.window, r.enabled);
++        if (!ok) std::fprintf(stderr, "mouse capture: %s\n", SDL_GetError());
++        if (std::getenv("DREAM_TRACE_MOUSE_CAPTURE"))
++            std::printf("mouse capture: requested=%d actual=%d main_thread=%d ok=%d\n",
++                        r.enabled, SDL_GetWindowRelativeMouseMode(r.window), SDL_IsMainThread(), ok);
++    };
++    // Relative mode is main-thread-only in SDL3. The guest thread polls input and
++    // opens overlays, while the main thread pumps events. Wait for completion so
++    // this stack request and its window stay alive until the operation finishes.
++    if (threaded_ && !SDL_IsMainThread()) {
++        if (!SDL_RunOnMainThread(apply, &request, true))
++            std::fprintf(stderr, "mouse capture dispatch: %s\n", SDL_GetError());
++    } else {
++        apply(&request);
++    }
+ }
+ 
+ }  // namespace dream::render::vk

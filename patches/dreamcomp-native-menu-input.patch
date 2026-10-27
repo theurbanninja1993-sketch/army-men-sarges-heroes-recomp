@@ -1,0 +1,132 @@
+--- a/engine/runtime/include/dream/runtime/host_ext.h
++++ b/engine/runtime/include/dream/runtime/host_ext.h
+@@ -109,6 +109,10 @@
+     std::function<void()> quit;                  // end the run, as closing the window does
+     std::function<void()> open_bindings;         // the controller binding screen (F1)
+     std::function<void(float)> set_rumble;       // 0..1
++    // Native menus may show the pointer without blocking the guest's controller.
++    std::function<void(bool)> set_pointer_input;
++    // SDL window coordinates to fractions of the window (main-thread-safe).
++    std::function<bool(float, float, float&, float&)> normalize_pointer;
+     std::function<void(bool)> set_fullscreen;
+     std::function<bool()> fullscreen;
+     std::function<void(float)> set_volume;       // 0..1, master output level
+--- a/engine/render/include/dream/render/vk/window.h
++++ b/engine/render/include/dream/render/vk/window.h
+@@ -143,6 +143,13 @@
+             apply_mouse_capture();
+         }
+     }
++    void set_pointer_input(bool yes) noexcept {
++        if (pointer_input_ != yes) {
++            if (!yes) pointer_release_ = true;
++            pointer_input_ = yes; apply_mouse_capture();
++        }
++    }
++    bool normalize_pointer(float x, float y, float& nx, float& ny) const noexcept;
+     bool game_input_blocked() const noexcept { return game_input_blocked_; }
+     // Threaded mode (dreamcomp): the thread that created the window pumps SDL with
+     // pump_events() while another thread runs the guest and calls poll(), which then works
+@@ -273,6 +280,7 @@
+     float vstick_x_ = 0.0f, vstick_y_ = 0.0f;  // Escape is the game's pause (Start), not quit (dreamcomp)
+     bool pad_menu_button_ = true;
+     bool game_input_blocked_ = false;
++    bool pointer_input_ = false, pointer_release_ = false;
+     PresentMode wanted_present_ = PresentMode::Fifo;
+     PresentPath wanted_path_ = PresentPath::Auto;
+     std::unique_ptr<DxgiPresenter> dxgi_;  // set when presenting through DXGI (dreamcomp)
+--- a/engine/render/src/vk/window.cpp
++++ b/engine/render/src/vk/window.cpp
+@@ -612,16 +612,17 @@
+     // now, and a key pressed and released between two polls should not be missed or repeated.
+     const bool* keys = SDL_GetKeyboardState(nullptr);
+     const Uint32 mouse_buttons = SDL_GetMouseState(nullptr, nullptr);
++    if (!mouse_buttons) pointer_release_ = false;
+     // Relative motion since the last poll drives the virtual stick; it springs back to centre when
+     // the mouse stops (dreamcomp mouse steering).
+     float mrx = 0.0f, mry = 0.0f;
+     SDL_GetRelativeMouseState(&mrx, &mry);
+     if (mouse_motion) {
+         vstick_x_ = vstick_y_ = 0.0f;
+-        const bool active = mouse_steer_ && !capturing_ && !game_input_blocked_ &&
++        const bool active = mouse_steer_ && !pointer_input_ && !pointer_release_ && !capturing_ && !game_input_blocked_ &&
+                             (SDL_GetWindowFlags(window_) & SDL_WINDOW_INPUT_FOCUS);
+         mouse_motion(active ? mrx : 0.0f, active ? mry : 0.0f, active);
+-    } else if (mouse_steer_ && !capturing_) {
++    } else if (mouse_steer_ && !pointer_input_ && !pointer_release_ && !capturing_) {
+         // Forward and back do nothing until the right button (aim) is held: a player who only
+         // turns with the mouse must not walk.
+         const bool aim_held = (mouse_buttons & SDL_BUTTON_MASK(SDL_BUTTON_RIGHT)) != 0;
+@@ -668,10 +669,11 @@
+             for (unsigned slot = 0; slot < kBindingSlots; ++slot) {
+                 const auto& kb = key_[slot][i];
+                 if ((kb.source == BindSource::Key && keys[kb.code]) ||
+-                    (kb.source == BindSource::Mouse && (mouse_buttons & SDL_BUTTON_MASK(kb.code))))
++                    (!pointer_input_ && !pointer_release_ && kb.source == BindSource::Mouse && (mouse_buttons & SDL_BUTTON_MASK(kb.code))))
+                     physical.controls[i] = 1.0f;
+             }
+-        physical.aiming = (mouse_buttons & SDL_BUTTON_MASK(SDL_BUTTON_RIGHT)) != 0;
++        physical.aiming = !pointer_input_ && !pointer_release_ &&
++                          (mouse_buttons & SDL_BUTTON_MASK(SDL_BUTTON_RIGHT)) != 0;
+         physical.shift = keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT];
+         physical.forward = keys[SDL_SCANCODE_W];
+         physical.backward = keys[SDL_SCANCODE_S];
+@@ -736,7 +738,7 @@
+             const Resolved& gb = gpad_[s][i];
+             if (p == 0 && !mapped_keyboard && keys && kb.source == BindSource::Key && keys[kb.code])
+                 digital_on = true;
+-            if (p == 0 && !mapped_keyboard && kb.source == BindSource::Mouse && (mouse_buttons & SDL_BUTTON_MASK(kb.code)))
++            if (p == 0 && !mapped_keyboard && !pointer_input_ && !pointer_release_ && kb.source == BindSource::Mouse && (mouse_buttons & SDL_BUTTON_MASK(kb.code)))
+                 digital_on = true;
+             if (SDL_Gamepad* g = mapped_gamepad ? nullptr : player_pad) {
+                 if (gb.source == BindSource::Button) {
+@@ -763,7 +765,7 @@
+             }
+         }
+ 
+-        if (p == 0 && mouse_steer_ && !capturing_) {
++        if (p == 0 && mouse_steer_ && !pointer_input_ && !pointer_release_ && !capturing_) {
+             constexpr float kMouseDead = 0.05f;
+             const float vx = std::abs(vstick_x_) > kMouseDead ? vstick_x_ : 0.0f;
+             const float vy = std::abs(vstick_y_) > kMouseDead ? vstick_y_ : 0.0f;
+@@ -1124,12 +1126,26 @@
+     return path;
+ }
+ 
++bool Window::normalize_pointer(float x, float y, float& nx, float& ny) const noexcept {
++    struct Request { SDL_Window* window; int w = 0, h = 0; } request{window_};
++    auto read_size = [](void* data) {
++        auto& r = *static_cast<Request*>(data);
++        if (r.window) SDL_GetWindowSize(r.window, &r.w, &r.h);
++    };
++    if (threaded_ && !SDL_IsMainThread()) {
++        if (!SDL_RunOnMainThread(read_size, &request, true)) return false;
++    } else read_size(&request);
++    if (request.w <= 0 || request.h <= 0) return false;
++    nx = x / static_cast<float>(request.w); ny = y / static_cast<float>(request.h);
++    return true;
++}
++
+ void Window::apply_mouse_capture() noexcept {
+     // Relative mode hides the cursor and keeps it in the window while the mouse steers. SDL drops
+     // it by itself when the window loses focus, and F9 turns steering (and so capture) off.
+     if (!window_) return;
+     struct Request { SDL_Window* window; bool enabled; };
+-    Request request{window_, mouse_steer_ && !game_input_blocked_};
++    Request request{window_, mouse_steer_ && !pointer_input_ && !game_input_blocked_};
+     auto apply = [](void* data) {
+         const auto& r = *static_cast<Request*>(data);
+         const bool ok = SDL_SetWindowRelativeMouseMode(r.window, r.enabled);
+--- a/engine/runtime/boot/boot_main.cpp
++++ b/engine/runtime/boot/boot_main.cpp
+@@ -2541,6 +2541,10 @@
+                     lp->open_menu();
+             };
+             hc.set_rumble = [lp](float v) { lp->window.rumble_scale = std::clamp(v, 0.0f, 1.0f); };
++            hc.set_pointer_input = [lp](bool on) { lp->window.set_pointer_input(on); };
++            hc.normalize_pointer = [lp](float x, float y, float& nx, float& ny) {
++                return lp->window.normalize_pointer(x, y, nx, ny);
++            };
+             hc.set_fullscreen = [lp](bool on) { lp->window.set_fullscreen(on); };
+             hc.fullscreen = [lp] { return lp->window.fullscreen(); };
+             hc.window_aspect = [lp] {

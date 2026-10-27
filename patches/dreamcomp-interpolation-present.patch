@@ -1,0 +1,42 @@
+--- a/engine/runtime/boot/boot_main.cpp
++++ b/engine/runtime/boot/boot_main.cpp
+@@ -387,6 +387,9 @@
+             std::printf("interpolation: display %.0f Hz, %s\n", static_cast<double>(hz),
+                         interpolate ? "on" : "off (60 Hz or unknown)");
+         }
++        // Inserted frames are sampled directly by the presenter, just like native
++        // frames. Leave the image shader-readable rather than in transfer layout.
++        interp_off.readback = false;
+         // Geometry interpolation (dreamcomp): a second target for the frame between two renders.
+         if (interpolate && !interp_off.create(window.context(), w, h)) {
+             error = interp_off.error();
+@@ -400,6 +403,12 @@
+         }
+         if (!presenter.create(window.context(), window.render_pass())) {
+             error = presenter.error();
++            return false;
++        }
++        // Each source needs its own descriptor: updating the native presenter
++        // while the inserted frame is still in flight changes a pending binding.
++        if (interpolate && !interp_presenter.create(window.context(), window.render_pass())) {
++            error = interp_presenter.error();
+             return false;
+         }
+         counter_presenter.overlay_layer = true;
+@@ -629,7 +638,7 @@
+                 const VkRect2D isc{{0, 0}, window.extent()};
+                 vkCmdSetViewport(icmd, 0, 1, &iv);
+                 vkCmdSetScissor(icmd, 0, 1, &isc);
+-                presenter.draw_view(icmd, interp_off.sampled_view(), interp_off.width(),
++                interp_presenter.draw_view(icmd, interp_off.sampled_view(), interp_off.width(),
+                                     interp_off.height(), window.extent());
+                 if (show_fps) counter_presenter.draw(icmd, window.extent());
+                 vkCmdEndRenderPass(icmd);
+@@ -1122,6 +1131,7 @@
+     std::uint64_t vram_invalidated = 0;  // textures dropped because the guest rewrote them
+     std::chrono::steady_clock::time_point last_present{};
+     dream::render::vk::Presenter presenter;
++    dream::render::vk::Presenter interp_presenter;
+     dream::render::vk::Presenter counter_presenter;
+     std::vector<std::uint32_t> counter_pixels;
+     std::string counter_text;

@@ -1,0 +1,102 @@
+--- a/engine/runtime/boot/boot_main.cpp
++++ b/engine/runtime/boot/boot_main.cpp
+@@ -400,6 +400,11 @@
+         }
+         if (!presenter.create(window.context(), window.render_pass())) {
+             error = presenter.error();
++            return false;
++        }
++        counter_presenter.overlay_layer = true;
++        if (!counter_presenter.create(window.context(), window.render_pass())) {
++            error = counter_presenter.error();
+             return false;
+         }
+         overlay_presenter.overlay_layer = true;  // dreamcomp: the in-game menu, blended on top
+@@ -601,12 +606,13 @@
+         const bool overlay_up = overlay_open();
+         // An open overlay owns the keyboard and pads; the game keeps running with them released.
+         window.set_game_input_blocked(overlay_up);
+-        if (interpolate && interp_ready && from_renderer && !offscreen.readback && !show_fps &&
++        if (interpolate && interp_ready && from_renderer && !offscreen.readback &&
+             !menu.is_open() && !overlay_up) {
+             interp_ready = false;
+             std::uint32_t iimage = 0;
+             VkCommandBuffer icmd = VK_NULL_HANDLE;
+             if (window.begin_frame(iimage, icmd)) {
++                if (show_fps) upload_counter(icmd);
+                 VkClearValue iclear[2]{};
+                 iclear[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+                 iclear[1].depthStencil = {0.0f, 0};
+@@ -625,6 +631,7 @@
+                 vkCmdSetScissor(icmd, 0, 1, &isc);
+                 presenter.draw_view(icmd, interp_off.sampled_view(), interp_off.width(),
+                                     interp_off.height(), window.extent());
++                if (show_fps) counter_presenter.draw(icmd, window.extent());
+                 vkCmdEndRenderPass(icmd);
+                 if (!window.end_frame(iimage))
+                     window.recreate_swapchain();
+@@ -663,8 +670,10 @@
+             }
+         }
+         const bool cpu_overlay = overlay_up && !overlay_px;
++        const bool gpu_counter = show_fps && !menu.is_open() && !overlay_up;
++        if (gpu_counter) upload_counter(cmd);
+         const bool direct =
+-            from_renderer && !offscreen.readback && !show_fps && !menu.is_open() && !cpu_overlay;
++            from_renderer && !offscreen.readback && !menu.is_open() && !cpu_overlay;
+         const std::uint32_t* source =
+             direct ? nullptr : (from_renderer ? offscreen.pixels() : pixels.data());
+         // Composited into the frame as it is handed to the GPU, so it costs no extra copy of the
+@@ -689,7 +698,7 @@
+             if (menu.is_open())
+                 menu.draw(px, shown.width, shown.width, shown.height, window.devices());
+             presenter.upload(cmd, px, shown.width, shown.height);
+-        } else if (show_fps || menu.is_open())
++        } else if ((show_fps && !gpu_counter) || menu.is_open())
+             presenter.upload(cmd, source, shown.width, shown.height,
+                              [this](std::uint32_t* px, std::uint32_t w, std::uint32_t h) {
+                                  if (show_fps)
+@@ -730,6 +739,7 @@
+                                 window.extent());
+         else
+             presenter.draw(cmd, window.extent());
++        if (gpu_counter) counter_presenter.draw(cmd, window.extent());
+         if (overlay_px)
+             overlay_presenter.draw(cmd, window.extent());
+         vkCmdEndRenderPass(cmd);
+@@ -939,6 +949,24 @@
+         fps_guest_at_mark = guest_s;
+     }
+ 
++    // Counter pixels are independent of the internal render resolution. Only this
++    // small transparent image is uploaded; the game image stays on the GPU.
++    void upload_counter(VkCommandBuffer cmd) {
++        const auto extent = window.extent();
++        const std::uint32_t w = 640;
++        const std::uint32_t h = std::max(1u, static_cast<std::uint32_t>(
++            static_cast<std::uint64_t>(w) * extent.height / std::max(1u, extent.width)));
++        char line[64];
++        std::snprintf(line, sizeof line, "%.1f FPS  %.2fX", fps_shown, speed_shown);
++        if (counter_h == h && counter_text == line) return;
++        counter_pixels.assign(static_cast<std::size_t>(w) * h, 0);
++        draw_counter(counter_pixels.data(), w, h);
++        if (counter_presenter.upload(cmd, counter_pixels.data(), w, h)) {
++            counter_h = h;
++            counter_text = line;
++        }
++    }
++
+     // Drawn into the frame the presenter is about to upload, so its size follows --scale and it
+     // stays the same size relative to the picture however the window is resized.
+     void draw_counter(std::uint32_t* px, std::uint32_t w, std::uint32_t h) {
+@@ -1094,6 +1122,10 @@
+     std::uint64_t vram_invalidated = 0;  // textures dropped because the guest rewrote them
+     std::chrono::steady_clock::time_point last_present{};
+     dream::render::vk::Presenter presenter;
++    dream::render::vk::Presenter counter_presenter;
++    std::vector<std::uint32_t> counter_pixels;
++    std::string counter_text;
++    std::uint32_t counter_h = 0;
+     dream::render::vk::Presenter overlay_presenter;  // dreamcomp: the in-game menu layer
+     std::uint32_t overlay_w = 0, overlay_h = 0;
+     bool overlay_dirty = true;

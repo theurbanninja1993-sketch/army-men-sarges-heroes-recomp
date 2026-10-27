@@ -1,0 +1,98 @@
+--- a/engine/render/src/interpolate.cpp
++++ b/engine/render/src/interpolate.cpp
+@@ -2,7 +2,7 @@
+ 
+ #include <algorithm>
+ #include <cmath>
+-#include <cstring>
++#include <unordered_map>
+ #include <map>
+ #include <array>
+ 
+@@ -251,7 +251,7 @@
+     // A strip missing from the older frame must follow its matched neighbours at
+     // shared corners. Conflicting matches keep that corner at the native position.
+     // Flat sprites/HUD layers are independent even when their positions coincide.
+-    std::map<std::array<std::uint32_t, 3>, std::vector<std::size_t>> corners;
++    std::vector<bool> used(newer.vertices.size(), false);
+     std::vector<bool> spatial(newer.vertices.size(), false);
+     for (const auto &list : newer.lists) {
+         for (const auto &poly : list) {
+@@ -265,11 +265,7 @@
+             for (std::uint32_t k = 0; k < poly.count; ++k) {
+                 const auto index = poly.first + k;
+                 spatial[index] = spatial[index] || !flat;
+-                const auto &v = newer.vertices[index];
+-                std::array<std::uint32_t, 3> key{};
+-                const float xyz[] = {v.x == 0 ? 0 : v.x, v.y == 0 ? 0 : v.y, v.z == 0 ? 0 : v.z};
+-                std::memcpy(key.data(), xyz, sizeof(xyz));
+-                corners[key].push_back(index);
++                used[index] = true;
+             }
+         }
+     }
+@@ -284,6 +280,51 @@
+         return i;
+     };
+     auto join = [&](std::size_t a, std::size_t b) { parent[root(b)] = root(a); };
++    // Separate projections of the same world corner can differ by a few float
++    // ULPs (notably on the snow terrain). Search neighbouring screen-space cells
++    // and require near-identical reciprocal depth, so rounding cannot split an
++    // edge and distinct surfaces at the same screen position stay independent.
++    constexpr double cell_size = 0.001;
++    using Cell = std::array<std::int64_t, 2>;
++    struct CellHash {
++        std::size_t operator()(const Cell &cell) const {
++            auto h = static_cast<std::uint64_t>(cell[0]) * 0x9e3779b97f4a7c15ULL +
++                     static_cast<std::uint64_t>(cell[1]);
++            h = (h ^ (h >> 30)) * 0xbf58476d1ce4e5b9ULL;
++            h = (h ^ (h >> 27)) * 0x94d049bb133111ebULL;
++            return static_cast<std::size_t>(h ^ (h >> 31));
++        }
++    };
++    std::unordered_map<Cell, std::vector<std::size_t>, CellHash> cells;
++    cells.reserve(newer.vertices.size());
++    for (std::size_t i = 0; i < newer.vertices.size(); ++i) {
++        const auto &v = newer.vertices[i];
++        if (!used[i] || !std::isfinite(v.x) || !std::isfinite(v.y) ||
++            !std::isfinite(v.z) || std::abs(v.x) > 1e9f || std::abs(v.y) > 1e9f)
++            continue;
++        const Cell cell{static_cast<std::int64_t>(std::floor(v.x / cell_size)),
++                        static_cast<std::int64_t>(std::floor(v.y / cell_size))};
++        for (int dx = -1; dx <= 1; ++dx)
++            for (int dy = -1; dy <= 1; ++dy) {
++                const auto found = cells.find({cell[0] + dx, cell[1] + dy});
++                if (found == cells.end())
++                    continue;
++                for (auto j : found->second) {
++                    const auto &w = newer.vertices[j];
++                    if ((spatial[i] || spatial[j]) &&
++                        std::abs(double(v.x) - w.x) <= cell_size &&
++                        std::abs(double(v.y) - w.y) <= cell_size &&
++                        std::abs(v.z - w.z) <=
++                            std::max(1e-7f, std::max(std::abs(v.z), std::abs(w.z)) * 1e-6f))
++                        join(i, j);
++                }
++            }
++        cells[cell].push_back(i);
++    }
++    std::map<std::size_t, std::vector<std::size_t>> corners;
++    for (std::size_t i = 0; i < newer.vertices.size(); ++i)
++        if (used[i])
++            corners[root(i)].push_back(i);
+     for (const auto &entry : corners) {
+         const auto &indices = entry.second;
+         if (indices.size() < 2)
+@@ -362,9 +403,9 @@
+                 continue;
+             restored[corner] = true;
+             for (auto i : members[corner]) {
+-                out.vertices[i].x = newer.vertices[i].x;
+-                out.vertices[i].y = newer.vertices[i].y;
+-                out.vertices[i].z = newer.vertices[i].z;
++                out.vertices[i].x = newer.vertices[corner].x;
++                out.vertices[i].y = newer.vertices[corner].y;
++                out.vertices[i].z = newer.vertices[corner].z;
+             }
+             for (auto neighbor : incident[corner])
+                 if (!queued[neighbor]) {

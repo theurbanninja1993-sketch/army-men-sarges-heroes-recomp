@@ -1,0 +1,236 @@
+diff --git a/engine/runtime/CMakeLists.txt b/engine/runtime/CMakeLists.txt
+--- a/engine/runtime/CMakeLists.txt
++++ b/engine/runtime/CMakeLists.txt
+@@ -16,6 +16,7 @@
+   src/pvr/spg.cpp
+   src/pvr/core.cpp
+   src/system.cpp
++  src/gdrom/cdi.cpp
+   src/gdrom/disc.cpp
+   src/gdrom/mod_disc.cpp
+   src/hle/flash.cpp
+diff --git a/engine/runtime/src/gdrom/disc.cpp b/engine/runtime/src/gdrom/disc.cpp
+--- a/engine/runtime/src/gdrom/disc.cpp
++++ b/engine/runtime/src/gdrom/disc.cpp
+@@ -479,9 +479,12 @@
+     return false;
+ }
+ 
++std::unique_ptr<Disc> open_cdi(const std::filesystem::path& path, std::string& error);
++
+ std::unique_ptr<Disc> open_disc(const std::filesystem::path& path, std::string& error) {
+     std::string ext = path.extension().string();
+     for (auto& ch : ext) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
++    if (ext == ".cdi") return open_cdi(path, error);
+     if (ext == ".gdi") {
+         auto d = std::make_unique<GdiDisc>();
+         return d->open(path, error) ? std::unique_ptr<Disc>(std::move(d)) : nullptr;
+diff --git a/engine/runtime/src/gdrom/cdi.cpp b/engine/runtime/src/gdrom/cdi.cpp
+--- /dev/null
++++ b/engine/runtime/src/gdrom/cdi.cpp
+@@ -0,0 +1,145 @@
++// DiscJuggler v2/v3/v3.5: sector payloads followed by a little-endian session directory.
++#include "dream/runtime/gdrom/disc.h"
++
++#include <array>
++#include <fstream>
++#include <limits>
++
++namespace dream::gdrom {
++namespace {
++class CdiDisc final : public Disc {
++    struct Payload {
++        std::uint64_t offset;
++        std::uint32_t stride, user_offset;
++    };
++    std::ifstream file_;
++    std::vector<Payload> payloads_;
++
++public:
++    bool open(const std::filesystem::path& path, std::string& error) {
++        path_ = path.string();
++        file_.open(path, std::ios::binary);
++        auto fail = [&](const char* reason) {
++            error = std::string("CDI: ") + reason;
++            return false;
++        };
++        if (!file_) return fail("cannot open image");
++        file_.seekg(0, std::ios::end);
++        const auto end = file_.tellg();
++        if (end < 8) return fail("truncated footer");
++        const auto size = static_cast<std::uint64_t>(end);
++        file_.seekg(end - std::streamoff(8));
++        auto integer = [&](unsigned bytes) {
++            std::uint32_t value = 0;
++            for (unsigned i = 0; i < bytes; ++i) {
++                char byte = 0;
++                file_.get(byte);
++                value |= std::uint32_t(static_cast<unsigned char>(byte)) << (8 * i);
++            }
++            return value;
++        };
++        const auto version = integer(4), directory = integer(4);
++        constexpr std::uint32_t v2 = 0x80000004, v3 = 0x80000005, v35 = 0x80000006;
++        if (version != v2 && version != v3 && version != v35)
++            return fail("unsupported DiscJuggler version");
++        if (!directory || directory > size - 8) return fail("invalid directory offset");
++        const std::uint64_t header = version == v35 ? size - directory : directory;
++        if (header >= size - 8) return fail("invalid directory offset");
++        file_.seekg(static_cast<std::streamoff>(header));
++        // All directory operations stay before the footer, including optional metadata blocks.
++        auto skip = [&](std::uint32_t n) { file_.ignore(n); };
++        auto valid = [&]() {
++            const auto pos = file_.tellg();
++            return file_ && pos >= 0 && static_cast<std::uint64_t>(pos) <= size - 8;
++        };
++        const auto sessions = integer(2);
++        if (!sessions || sessions > 99) return fail("invalid session count");
++        std::uint64_t payload = 0;
++        for (unsigned session = 0; session < sessions; ++session) {
++            const auto count = integer(2);
++            if (count > 99 - tracks_.size()) return fail("invalid track count");
++            for (unsigned i = 0; i < count; ++i) {
++                if (integer(4)) skip(8);
++                constexpr std::array<unsigned char, 10> marker{0, 0, 1, 0, 0, 0, 255, 255, 255, 255};
++                for (unsigned copy = 0; copy < 2; ++copy) {
++                    std::array<unsigned char, 10> found{};
++                    file_.read(reinterpret_cast<char*>(found.data()), found.size());
++                    if (!file_ || found != marker) return fail("invalid track marker");
++                }
++                skip(4);
++                const auto filename_size = integer(1);
++                skip(filename_size + 19);
++                if (integer(4) == 0x80000000) skip(8);
++                skip(2);
++                const auto pregap = integer(4), length = integer(4);
++                skip(6);
++                const auto mode = integer(4);
++                skip(12);
++                const auto start = integer(4), total = integer(4);
++                skip(16);
++                const auto format = integer(4);
++                std::uint32_t stride = 0;
++                switch (format) {
++                    case 0: stride = 2048; break;
++                    case 1: stride = 2336; break;
++                    case 2: stride = 2352; break;
++                    case 4: stride = 2448; break;
++                    default: return fail("unsupported sector size");
++                }
++                skip(29);
++                if (version != v2) {
++                    skip(5);
++                    if (integer(4) == 0xffffffff) skip(78);
++                }
++                if (!valid()) return fail("truncated track directory");
++                const std::uint64_t fad = std::uint64_t(start) + pregap;
++                const auto bytes = std::uint64_t(total) * stride;
++                if (mode > 2 || (!mode && stride < 2352) ||
++                    (stride == 2336 && mode != 2))
++                    return fail("unsupported track mode");
++                if (!length || std::uint64_t(pregap) + length > total ||
++                    fad < kFadOffset || fad - kFadOffset + length >
++                        std::numeric_limits<std::uint32_t>::max() ||
++                    payload > header || bytes > header - payload)
++                    return fail("invalid or truncated track payload");
++                Track t;
++                t.number = static_cast<unsigned>(tracks_.size() + 1);
++                t.lba = static_cast<std::uint32_t>(fad - kFadOffset);
++                t.sectors = length;
++                t.data = mode != 0;
++                // Strip Mode 2 headers and subchannel bytes here. The runtime sees ordinary
++                // 2048-byte data sectors or 2352-byte audio, as it does for a converted GDI.
++                t.sector_size = t.data ? 2048 : 2352;
++                const std::uint32_t user_offset = !t.data || stride == 2048 ? 0 :
++                    stride == 2336 ? 8 : mode == 2 ? 24 : 16;
++                if (!tracks_.empty() && t.lba < tracks_.back().end_lba())
++                    return fail("overlapping tracks");
++                tracks_.push_back(t);
++                payloads_.push_back({payload + std::uint64_t(pregap) * stride, stride, user_offset});
++                payload += bytes;
++            }
++            skip(version == v2 ? 12 : 13);
++            if (!valid()) return fail("truncated session directory");
++        }
++        if (tracks_.empty()) return fail("image contains no tracks");
++        finish_tracks();
++        return true;
++    }
++
++    bool read_raw(std::uint32_t lba, std::uint8_t* out) override {
++        const auto* track = track_for(lba);
++        if (!track) return false;
++        const auto& p = payloads_[track->number - 1];
++        const auto offset = p.offset + std::uint64_t(lba - track->lba) * p.stride + p.user_offset;
++        file_.clear();
++        file_.seekg(static_cast<std::streamoff>(offset));
++        return bool(file_.read(reinterpret_cast<char*>(out), track->sector_size));
++    }
++};
++}  // namespace
++
++std::unique_ptr<Disc> open_cdi(const std::filesystem::path& path, std::string& error) {
++    auto disc = std::make_unique<CdiDisc>();
++    return disc->open(path, error) ? std::unique_ptr<Disc>(std::move(disc)) : nullptr;
++}
++}  // namespace dream::gdrom
+diff --git a/src/frontend/launcher.cpp b/src/frontend/launcher.cpp
+--- a/src/frontend/launcher.cpp
++++ b/src/frontend/launcher.cpp
+@@ -164,7 +164,7 @@
+ 
+     void pick_disc() {
+         static const SDL_DialogFileFilter filters[] = {
+-            {"Dreamcast disc images (*.cue, *.gdi, *.chd)", "cue;gdi;chd"}, {"All files", "*"}};
++            {"Dreamcast disc images (*.cue, *.gdi, *.chd, *.cdi)", "cue;gdi;chd;cdi"}, {"All files", "*"}};
+         std::string start;
+         const std::string cur = ctx_.settings->get("disc");
+         if (!cur.empty())
+diff --git a/docs/FRONTEND.md b/docs/FRONTEND.md
+--- a/docs/FRONTEND.md
++++ b/docs/FRONTEND.md
+@@ -10,6 +10,11 @@
+ | Settings panel | over the launcher, and **in game over the running game** (rendered at window size, blended on the GPU) | large translucent modal: tabs **General / Controls / Graphics / Sound / Mods**, **Quit Game** (asks "Quit Soulcalibur?", Cancel focused) and **×** top right; option rows left, the focused/hovered option's description right; prompts and **Apply** at the bottom |
+ 
+ ## Using it
++
++**Disc formats:** the launcher and runtime accept GDI, CUE, CHD, and DiscJuggler CDI
++(v2/v3/v3.5) images. CDI is read directly without extraction or conversion. Disc selection still
++requires the exact boot executable revision used to build the port; format support does not
++make other game revisions compatible. The Python source-build extraction tools are separate.
+ 
+ | Start | What happens |
+ |---|---|
+diff --git a/engine/runtime/include/dream/runtime/gdrom/disc.h b/engine/runtime/include/dream/runtime/gdrom/disc.h
+--- a/engine/runtime/include/dream/runtime/gdrom/disc.h
++++ b/engine/runtime/include/dream/runtime/gdrom/disc.h
+@@ -63,7 +63,7 @@
+ bool read_root_file(Disc& disc, std::string name, std::vector<std::uint8_t>& out,
+                     std::string* resolved_name = nullptr);
+ 
+-// Opens by extension: .gdi, .cue (Redump GD-ROM layout) or .chd. Returns nullptr and sets `error` on failure.
++// Opens by extension: .gdi, .cue (Redump GD-ROM layout), .cdi (DiscJuggler) or .chd. Returns nullptr and sets `error` on failure.
+ std::unique_ptr<Disc> open_disc(const std::filesystem::path& path, std::string& error);
+ 
+ }  // namespace dream::gdrom
+diff --git a/src/frontend/menu_ui.cpp b/src/frontend/menu_ui.cpp
+--- a/src/frontend/menu_ui.cpp
++++ b/src/frontend/menu_ui.cpp
+@@ -470,7 +470,7 @@
+     } else {
+         modal_ = {"Cannot read this image",
+                   file + ": " + (c.detail.empty() ? std::string("not a readable disc image") : c.detail) +
+-                      ". Choose a .cue, .gdi or .chd dump of your own disc.",
++                      ". Choose a .cue, .gdi, .chd or .cdi dump of your own disc.",
+                   ""};
+     }
+     want_focus_ = "modal-ok";
+@@ -649,7 +649,7 @@
+         cls = "ok";
+         text = std::string(kCheck) + "  " + file + "  \xE2\x80\x94  verified";
+     } else if (disc_.status == DiscStatus::None) {
+-        text = "Load Game: choose an image of your own disc (.cue, .gdi or .chd)";
++        text = "Load Game: choose an image of your own disc (.cue, .gdi, .chd or .cdi)";
+     } else {
+         cls = "bad";
+         text = std::string(kCross) + "  " + file + "  \xE2\x80\x94  " +
