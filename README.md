@@ -5,10 +5,13 @@
 An unofficial native PC port of the Dreamcast version of **Army Men: Sarge's Heroes**, built
 with [Dreamcomp](https://github.com/danielgomesvieira2000/dreamcomp).
 
-**Linux release available. Windows version coming soon.** Windows builds and Steam Deck support
-have not yet been validated.
+**Linux and Windows x64 releases available.** The Windows build was validated on Windows 11:
+level 1 through level 2, mouse and keyboard, and Classic and Modern controller modes. Steam Deck
+has not yet been validated separately.
 
 ## Play
+
+### Linux
 
 1. Download the Linux x86_64 archive from [Releases](https://github.com/theurbanninja1993-sketch/army-men-sarges-heroes-recomp/releases) and extract it.
 2. Run `./army-men-sarges-heroes-recomp` in the extracted directory. If your file manager asks,
@@ -17,17 +20,30 @@ have not yet been validated.
    **CDI, GDI, CUE/BIN, or CHD**. Keep a GDI/CUE's accompanying track files together.
 4. Choose **Start Game**. The launcher remembers the disc location and your settings.
 
+### Windows
+
+1. Download the Windows x64 archive from [Releases](https://github.com/theurbanninja1993-sketch/army-men-sarges-heroes-recomp/releases) and extract it somewhere writable.
+2. Run `army-men-sarges-heroes-recomp.exe`. If Windows asks, allow it.
+3. In the launcher, choose **Load Game** and select your own Dreamcast disc image:
+   **CDI, GDI, CUE/BIN, or CHD**. Keep a GDI/CUE's accompanying track files together.
+4. Choose **Start Game**. The launcher remembers the disc location and your settings.
+
+The Windows build is a console program, so a console window stays open with the log. Keep it while
+testing or reporting an issue.
+
 You must supply your own game. This build requires the matching Dreamcast executable revision
 **T-9715N V1.001**, boot SHA-1 `51384b12a9de6d9a44caecaadafd29dca86807cf`.
 Different releases or modified boot executables may be rejected. The image stays on your computer.
 No disc image, extracted assets, BIOS, saves, or generated game source are distributed here.
 The release executable includes the compiled static translation and still requires your disc.
 
-### Linux requirements
+### Requirements
 
-- x86_64 Linux, glibc 2.39 or newer (Ubuntu 24.04 or a compatible/newer distribution).
-- A Vulkan-capable GPU with working drivers and a desktop session.
-- Keyboard and mouse or a gamepad. SDL3 is included in the binary package.
+- **Linux:** x86_64, glibc 2.39 or newer (Ubuntu 24.04 or a compatible/newer distribution), a
+  Vulkan-capable GPU with working drivers, and a desktop session.
+- **Windows:** Windows 10/11 x64 and a Vulkan-capable GPU with current drivers. SDL3 is bundled and
+  the Microsoft C/C++ runtime is linked statically, so no redistributable is needed.
+- Keyboard and mouse or a gamepad.
 
 ### RecompLauncher
 

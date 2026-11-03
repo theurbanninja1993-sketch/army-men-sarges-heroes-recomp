@@ -1,3 +1,16 @@
+# v0.1.2 — Windows x64 release
+
+Adds a native Windows x64 build alongside the Linux build. Same game code and features.
+
+- Windows 10/11 x64, a Vulkan-capable GPU and current drivers. SDL3 is bundled and the Microsoft
+  C/C++ runtime is linked statically, so no redistributable is needed.
+- Validated on Windows 11: level 1 through level 2, mouse and keyboard, and both Classic and
+  Modern controller modes.
+- Download `army-men-sarges-heroes-recomp-v0.1.2-Windows-x64.zip` on Windows, or
+  `army-men-sarges-heroes-recomp-v0.1.2-linux-x86_64.tar.gz` on Linux.
+- `recomplauncher.json` is included in both; the same setup, settings and saves work on either
+  platform. Windows builds are console programs, so a console window stays open with the log.
+
 # v0.1.1 — RecompLauncher support
 
 Same game build as v0.1.0, packaged for RecompLauncher. The release now includes

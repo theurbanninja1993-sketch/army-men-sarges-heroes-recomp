@@ -40,4 +40,23 @@ build a separate `build-release/` tree with `DREAMCOMP_DIR` pointing to the incl
 
 ## Windows
 
-Windows version coming soon. A Windows build has not yet been validated for this port.
+Windows 10/11 x64. Install Visual Studio 2022 Build Tools with the C++ workload, LLVM
+(`clang-cl`), CMake, Ninja, Python 3.10+, and the Vulkan SDK. `dreamcomp/tools/dc.py` finds the
+toolchain and fetches SDL3 into `.deps/`.
+
+From the repository root, in a Developer Command Prompt, with your own matching GDI/CUE/CHD image:
+
+```bat
+python dreamcomp\tools\dc.py doctor
+python dreamcomp\tools\dc.py deps
+python dreamcomp\tools\dc.py setup . --disc "D:\discs\your-game.gdi"
+python dreamcomp\tools\dc.py build .
+build\game\army-men-sarges-heroes-recomp.exe --launcher
+```
+
+The Python developer extraction tool does not take CDI; use GDI, CUE, or CHD, or copy the
+extracted `1ST_READ.BIN` from a setup done on another machine. The runtime itself reads CDI.
+
+The published Windows release is cross-compiled on Linux with clang-cl, lld-link, and the MSVC
+CRT/STL and Windows SDK from `xwin` (see `tools/package_release_windows.py`). Native Windows
+builds use the same generated translation; both paths produce the same game code.
