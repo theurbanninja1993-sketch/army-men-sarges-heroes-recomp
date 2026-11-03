@@ -5,7 +5,7 @@
   "repo": "theurbanninja1993-sketch/army-men-sarges-heroes-recomp",
   "game": {
     "kind": "iso",
-    "label": "Your own Dreamcast game image: .cdi, .gdi (keep its track files beside it), .cue with its .bin, or .chd. This recomp needs the USA release, product T-9715N V1.001.",
+    "label": "Your own Dreamcast image (.cdi, .gdi, .cue or .chd), USA release T-9715N V1.001.",
     "check": {}
   },
   "start": {
