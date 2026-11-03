@@ -1,3 +1,18 @@
+# v0.1.1 — RecompLauncher support
+
+Same game build as v0.1.0, packaged for RecompLauncher. The release now includes
+`recomplauncher.json`, so RecompLauncher installs it, asks for your own Dreamcast image and
+starts the game without the port's own launcher. Window mode, resolution, aspect ratio, frame
+rate, frame timing, HUD layout, controller mode, mouse camera and loud sounds appear on the
+game's page.
+
+Supported images: `.cdi`, `.gdi` (keep its track files beside it), `.cue` with its `.bin`, or
+`.chd`. Needs the USA release, product T-9715N V1.001. RecompLauncher cannot verify a Dreamcast
+container itself, so the game checks the boot executable's SHA-1 at start and reports a wrong
+release or revision.
+
+Linux x86_64, glibc 2.39 or newer, a Vulkan GPU and working drivers. SDL3 is bundled.
+
 # v0.1.0 — First Linux release
 
 An unofficial native Linux x86_64 port of the Dreamcast version of Army Men: Sarge's Heroes.

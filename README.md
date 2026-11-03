@@ -27,6 +27,14 @@ The release executable includes the compiled static translation and still requir
 - A Vulkan-capable GPU with working drivers and a desktop session.
 - Keyboard and mouse or a gamepad. SDL3 is included in the binary package.
 
+### RecompLauncher
+
+The release includes `recomplauncher.json`, so [RecompLauncher](https://recomplauncher.com/)
+can install it, ask for your own game image and start the game directly. Pick your own
+`.cdi`, `.gdi` (keep its track files beside it), `.cue` with its `.bin`, or `.chd`.
+RecompLauncher writes the path into the game's settings, skips the port's own launcher, and
+shows the common video and control settings on the game's page.
+
 ## Features
 
 - Native mouse camera with horizontal-only/full camera modes and separate camera/aim sensitivities.

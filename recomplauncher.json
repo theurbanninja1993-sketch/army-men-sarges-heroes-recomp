@@ -1,0 +1,149 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "Army Men: Sarge's Heroes — Recompiled",
+  "repo": "theurbanninja1993-sketch/army-men-sarges-heroes-recomp",
+  "game": {
+    "kind": "iso",
+    "label": "Your own Dreamcast game image: .cdi, .gdi (keep its track files beside it), .cue with its .bin, or .chd. This recomp needs the USA release, product T-9715N V1.001.",
+    "check": {}
+  },
+  "start": {
+    "program": ["army-men-sarges-heroes-recomp", "army-men-sarges-heroes-recomp.exe"],
+    "args": ["--no-launcher", "--window", "--disc", "{game}"]
+  },
+  "config": [
+    {
+      "id": "main",
+      "format": "ini",
+      "file": [{ "path": "{config}/dreamcomp/armymensh/settings.ini" }],
+      "game_path": "disc",
+      "new": {
+        "aspect": "expanded",
+        "clip": "hard",
+        "controller_mode": "classic",
+        "fps": "auto",
+        "frame_timing": "display",
+        "fullscreen": "true",
+        "hud_layout": "edges",
+        "mouse_vertical": "true",
+        "scale": "2"
+      }
+    }
+  ],
+  "folders": {
+    "saves": [{ "path": "{config}/dreamcomp/armymensh" }]
+  },
+  "saves": [
+    "{config}/dreamcomp/armymensh/vmu_a1.bin",
+    "{config}/dreamcomp/armymensh/settings.ini"
+  ],
+  "exit_codes": {
+    "2": "It couldn't read that game image. Use your own Dreamcast copy as .cdi, .gdi (with its track files beside it), .cue (with its .bin) or .chd.",
+    "3": "That's a different release or revision. This recomp needs the USA Dreamcast release, product T-9715N V1.001."
+  },
+  "settings": [
+    {
+      "id": "window",
+      "label": "Window mode",
+      "help": "Fullscreen fills your screen. Windowed is handy while setting things up; Alt+Enter switches at any time.",
+      "choices": [
+        { "label": "Fullscreen", "set": { "fullscreen": "true" } },
+        { "label": "Windowed", "set": { "fullscreen": "false" } }
+      ],
+      "defaults": { "fullscreen": "true" }
+    },
+    {
+      "id": "resolution",
+      "label": "Resolution",
+      "help": "Draws the game at a multiple of 640×480. Higher is sharper and needs a faster graphics card.",
+      "choices": [
+        { "label": "Original", "set": { "scale": "1" } },
+        { "label": "2x", "set": { "scale": "2" } },
+        { "label": "3x", "set": { "scale": "3" } },
+        { "label": "4x", "set": { "scale": "4" } }
+      ],
+      "defaults": { "scale": "2" }
+    },
+    {
+      "id": "aspect",
+      "label": "Aspect ratio",
+      "help": "Expanded widens the view to fill a widescreen. Original keeps the console's 4:3 picture with bars.",
+      "choices": [
+        { "label": "Original (4:3)", "set": { "aspect": "original" } },
+        { "label": "Expanded", "set": { "aspect": "expanded" } }
+      ],
+      "defaults": { "aspect": "expanded" }
+    },
+    {
+      "id": "frame_rate",
+      "label": "Frame rate",
+      "help": "The game runs at 60. Auto blends an extra frame on a 120 Hz or faster screen; 120 always does; 60 shows only the game's frames.",
+      "choices": [
+        { "label": "Auto", "set": { "fps": "auto" } },
+        { "label": "120", "set": { "fps": "120" } },
+        { "label": "60 (original)", "set": { "fps": "60" } }
+      ],
+      "defaults": { "fps": "auto" }
+    },
+    {
+      "id": "frame_timing",
+      "label": "Frame timing",
+      "help": "Match display runs at your screen's rate when it is within 0.5% of the Dreamcast's 59.94 Hz. Exact keeps the console's timing.",
+      "choices": [
+        { "label": "Match display", "set": { "frame_timing": "display" } },
+        { "label": "Exact 59.94 Hz", "set": { "frame_timing": "exact" } }
+      ],
+      "defaults": { "frame_timing": "display" }
+    },
+    {
+      "id": "hud_layout",
+      "label": "HUD layout",
+      "help": "Where the HUD sits on a widened picture. Original keeps it in the 4:3 area; Expanded anchors it to the screen edges.",
+      "choices": [
+        { "label": "Original", "set": { "hud_layout": "center" } },
+        { "label": "Expanded", "set": { "hud_layout": "edges" } }
+      ],
+      "defaults": { "hud_layout": "edges" },
+      "when": { "aspect": "expanded" }
+    },
+    {
+      "id": "controller_mode",
+      "label": "Controller mode",
+      "help": "Classic keeps the Dreamcast's controls. Modern adds right-stick camera, RT fire, LT aim and left-stick strafing with RB.",
+      "choices": [
+        { "label": "Classic", "set": { "controller_mode": "classic" } },
+        { "label": "Modern", "set": { "controller_mode": "modern" } }
+      ],
+      "defaults": { "controller_mode": "classic" }
+    },
+    {
+      "id": "mouse_camera",
+      "label": "Mouse camera",
+      "help": "Horizontal only turns left and right. Full camera also lets you look up and down.",
+      "choices": [
+        { "label": "Horizontal only", "set": { "mouse_vertical": "false" } },
+        { "label": "Full camera", "set": { "mouse_vertical": "true" } }
+      ],
+      "defaults": { "mouse_vertical": "true" }
+    },
+    {
+      "id": "loud_sounds",
+      "label": "Loud sounds",
+      "help": "Original is the console's mix, which clips on the loudest hits. Softened rounds those peaks off.",
+      "choices": [
+        { "label": "Original", "set": { "clip": "hard" } },
+        { "label": "Softened", "set": { "clip": "soft" } }
+      ],
+      "defaults": { "clip": "hard" }
+    }
+  ],
+  "actions": [
+    {
+      "id": "saves",
+      "label": "Saves and settings",
+      "help": "Your memory card and the game's settings file.",
+      "open": "saves"
+    }
+  ]
+}

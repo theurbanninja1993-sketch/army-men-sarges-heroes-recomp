@@ -43,7 +43,7 @@ def main():
     ap.add_argument('--build', type=Path, default=Path('build-release'))
     ap.add_argument('--sdl-prefix', type=Path, default=Path('/opt/sdl3'))
     ap.add_argument('--sdl-source', type=Path, default=Path('/opt/SDL'))
-    ap.add_argument('--version', default='0.1.0')
+    ap.add_argument('--version', default='0.1.1')
     a = ap.parse_args()
     root = Path(__file__).resolve().parent.parent
     subprocess.run(['git', '-C', str(root), 'diff', '--exit-code', 'HEAD'], check=True)
@@ -57,6 +57,7 @@ def main():
     copy(build / 'game' / EXE, binary / EXE)
     copy(root / 'game/armymensh.toml', binary / 'armymensh.toml')
     copy(root / 'game/hud_overrides.ini', binary / 'hud_overrides.ini')
+    copy(root / 'recomplauncher.json', binary / 'recomplauncher.json')
     shutil.copytree(build / 'game/frontend', binary / 'frontend')
     copy((a.sdl_prefix / 'lib/libSDL3.so.0').resolve(), binary / 'lib/libSDL3.so.0')
     subprocess.run(['patchelf', '--set-rpath', '$ORIGIN/lib', str(binary / EXE)], check=True)
@@ -93,8 +94,8 @@ def main():
         source_tree(path.resolve(), source / 'third_party_sources' / name)
     shutil.copytree(binary / 'frontend/fonts', source / 'frontend_fonts')
     # Reject surprises before making either uploadable archive.
-    root_files = {EXE, 'armymensh.toml', 'hud_overrides.ini', 'README.md', 'BUILDING.md',
-                  'LICENSE', 'LICENSE-NOTICE.md', 'THIRD_PARTY_NOTICES.md'}
+    root_files = {EXE, 'armymensh.toml', 'hud_overrides.ini', 'recomplauncher.json',
+                  'README.md', 'BUILDING.md', 'LICENSE', 'LICENSE-NOTICE.md', 'THIRD_PARTY_NOTICES.md'}
     fonts = {'Inter-Regular.ttf', 'Inter-SemiBold.ttf', 'Inter-Bold.ttf', 'promptfont.ttf',
              'Inter-LICENSE.txt', 'PromptFont-LICENSE.txt'}
     for p in binary.rglob('*'):
