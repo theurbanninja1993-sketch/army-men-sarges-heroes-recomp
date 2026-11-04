@@ -509,8 +509,10 @@ void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float a
                 vx0 = mx < 320.0f ? 0.0f : 320.0f;
                 vx1 = vx0 + 320.0f;
             } else if (w >= 300.0f) {
-                vy0 = my < 240.0f ? 0.0f : 240.0f;
-                vy1 = vy0 + 240.0f;
+                // The scope fills its viewport's height; the split is not always at 240
+                // (the two-player top view is 0..256 in the captured frame).
+                vy0 = gy0[r];
+                vy1 = gy1[r];
             } else {
                 vx0 = mx < 320.0f ? 0.0f : 320.0f;
                 vx1 = vx0 + 320.0f;
