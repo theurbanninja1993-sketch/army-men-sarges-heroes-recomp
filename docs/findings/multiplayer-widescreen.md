@@ -35,6 +35,9 @@ Fix:
 
 - `game/hud_overrides.ini`: force the left panel's name and emblem to `anchor=center`
   (`rect=0,100,320,260` with `tcw=0x04060010,0x0007bf10`), matching the centred frame.
+- The dark panel behind both player boxes is untextured and spans the upper and lower rows.
+  Its centre (y~271) is below the background plane's, so `rect=30,250,614,448 anchor=center tcw=0`
+  moves it with the frame without touching the camo backdrop.
 - `dreamcomp/src/hud.cpp`: when a polygon's user tile clip lies inside a HUD element, move the
   clip's left/right edges with that element's anchor and `k`. Offscreen model viewports and the
   background are outside every HUD element and stay untouched.
