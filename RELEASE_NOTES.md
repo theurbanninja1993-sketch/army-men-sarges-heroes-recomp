@@ -1,3 +1,14 @@
+# v0.1.4 — Sniper scope and character-select fixes
+
+- **Sniper scope:** keeps the 4:3 scope texture at its native shape, so the crosshair stays
+  circular, and fills the extra width of the aiming player's viewport with black. In single
+  player that is the whole screen; in split screen only the aiming player's half or quadrant.
+  The game's own HUD still draws over the black.
+- **Character select:** the left name and emblem stay inside the centred green frame on the
+  first visit and after returning from a match.
+- Includes the v0.1.3 fixes: player set-up text/dark panel inside the green frame, and correct
+  split-screen culling.
+
 # v0.1.3 — Multiplayer widescreen fixes
 
 - **Player Set-Up screen:** the left name/emblem and the dark panel now stay inside the centred
