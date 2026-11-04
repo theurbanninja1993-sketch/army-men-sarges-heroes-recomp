@@ -1,3 +1,11 @@
+# v0.1.5 — Radar marker fix
+
+- **Radar enemy markers:** the character-select dark-panel override also matched the radar's
+  small untextured enemy markers and centred them, leaving them outside the radar at 16:9.
+  Overrides can now require a minimum piece size; the dark-panel rule requires a large panel,
+  so the markers follow the radar's left-side anchor again.
+- Includes the v0.1.4 sniper-scope and character-select fixes.
+
 # v0.1.4 — Sniper scope and character-select fixes
 
 - **Sniper scope:** keeps the 4:3 scope texture at its native shape, so the crosshair stays
