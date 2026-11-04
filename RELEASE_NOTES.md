@@ -1,3 +1,11 @@
+# v0.1.3 — Multiplayer widescreen fixes
+
+- **Player Set-Up screen:** the left name/emblem and the dark panel now stay inside the centred
+  green frame, and the character/gun are clipped to the panel border.
+- **Two-player split screen:** the game's own viewport aspect is scaled by the widescreen factor
+  instead of being overwritten with 16:9. Objects now stay visible to the edge of each half.
+- Single player at 16:9 is unchanged.
+
 # v0.1.2 — Windows x64 release
 
 Adds a native Windows x64 build alongside the Linux build. Same game code and features.
