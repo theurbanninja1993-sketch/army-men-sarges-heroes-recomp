@@ -23,6 +23,25 @@ story prose's first line (y0=200). No code change.
 Verified with the 16:9 TA capture replay and a live 16:9 run: the left panel now reads
 "Green Sarge Normal" intact, and the story card still centres as before.
 
+## Player set-up content inside the green box
+
+The full-width green frame is one HUD element. In the `edges` layout it is anchored to the
+centre, but the left panel's name and emblem were auto-anchored to the screen's left edge, and
+the panel's user tile clips (`32,96,320,256` / `320,96,608,256`) stayed at the native 4:3
+rectangle. The text/emblem sat outside the centred frame, and the clipped character/gun could
+draw past the panel border.
+
+Fix:
+
+- `game/hud_overrides.ini`: force the left panel's name and emblem to `anchor=center`
+  (`rect=0,100,320,260` with `tcw=0x04060010,0x0007bf10`), matching the centred frame.
+- `dreamcomp/src/hud.cpp`: when a polygon's user tile clip lies inside a HUD element, move the
+  clip's left/right edges with that element's anchor and `k`. Offscreen model viewports and the
+  background are outside every HUD element and stay untouched.
+
+Verified with the 16:9 capture replay and a live 16:9 run: the left text and emblem sit inside
+the left panel, and the character/gun are clipped to the panel border.
+
 ## Objects culled before the split-screen viewport edge
 
 The game stores the viewport aspect at `camera + 0xe8`. The port used to overwrite it with the

@@ -389,6 +389,41 @@ void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float a
         }
     }
     std::vector<int> box_of(n, -1);
+    // Move each user tile clip with the HUD element that contains it. A clipped 3D model or a
+    // 2D piece then stays inside its corrected panel instead of the panel's old 4:3 rectangle.
+    // Clips outside every HUD element (offscreen model viewports, the background) are untouched.
+    if (apply) {
+        struct GroupBox { float x0, x1, y0, y1, anchor; };
+        std::vector<GroupBox> groups;
+        for (std::size_t i = 0; i < n; ++i) {
+            if (root(i) != i) continue;
+            groups.push_back({gx0[i], gx1[i], gy0[i], gy1[i],
+                              anchor_x(gforced[i], 0.5f * (gx0[i] + gx1[i]), edges)});
+        }
+        for (auto& list : frame.lists)
+            for (auto& p : list) {
+                if (!p.tile_clip) continue;
+                const float cx0 = p.clip_x0, cx1 = p.clip_x1;
+                const float cy0 = p.clip_y0, cy1 = p.clip_y1;
+                const GroupBox* best = nullptr;
+                float best_area = 1e30f;
+                for (const auto& b : groups) {
+                    if (cx0 < b.x0 || cx1 > b.x1 || cy0 < b.y0 || cy1 > b.y1) continue;
+                    const float area = (b.x1 - b.x0) * (b.y1 - b.y0);
+                    if (area < best_area) {
+                        best_area = area;
+                        best = &b;
+                    }
+                }
+                if (!best) continue;
+                const auto scale = [&](float x) {
+                    return static_cast<std::uint16_t>(std::clamp(
+                        std::lround(best->anchor + (x - best->anchor) * k), 0l, 640l));
+                };
+                p.clip_x0 = scale(cx0);
+                p.clip_x1 = scale(cx1);
+            }
+    }
     for (std::size_t i = 0; i < n; ++i) {
         const std::size_t r = root(i);
         const float anchor = anchor_x(gforced[r], 0.5f * (gx0[r] + gx1[r]), edges);
