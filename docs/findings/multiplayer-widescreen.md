@@ -89,3 +89,30 @@ press Start/A on port B. The culling value can be checked without gameplay by wa
 The HUD override change is data-only and safe for every screen. The culling fix preserves the
 single-player 16:9 result and the 4:3 original. Native multiplayer confirmation on Windows is
 pending.
+
+## Sniper scope overlay
+
+The sniper scope is one flat textured quad. In the user's captures:
+
+| Case | TCW | Quad (native 640x480) |
+| --- | --- | --- |
+| Single player | `0x1006e910` | `0,0,640,480` |
+| Two-player top half | `0x1006e900` | `160,0,480,256` |
+
+Single player drew it full-screen, so the renderer stretched the 4:3 texture to 16:9 and made the
+crosshair oval. In split screen it stayed 4:3 and the game picture showed on the extra width.
+
+Fix: a `bars=1` override (`rect=0,0,640,480 anchor=center tcw=0x1006e910,0x1006e900 full=1`)
+keeps the scope at its native 4:3 shape, and the HUD pass fills the rest of the aiming player's
+viewport with opaque black. The viewport is the full screen for single player and the half or
+quadrant that contains the scope quad for split screen. The bars are inserted just in front of the
+picture (scope depth - 1) so the game's own HUD (face, radar, ammo) still draws over them.
+
+Verified with the single and multi captures: the crosshair is circular, the game picture outside
+the 4:3 scope is black, the other player's half is untouched, and the HUD remains visible.
+
+## Left emblem texture
+
+The left player's emblem can use a different texture word than the one in the first capture, so
+the position-based `rect=0,188,300,260 anchor=center` override catches the emblem band even when
+the texture differs. It stops below the name lines so "Normal" is not split again.

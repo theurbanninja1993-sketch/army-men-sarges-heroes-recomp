@@ -128,6 +128,8 @@ bool Overrides::load(const std::filesystem::path& file, std::string* error) {
                     }
             } else if (key == "full") {
                 o.full = value == "1" || value == "true";
+            } else if (key == "bars") {
+                o.bars = value == "1" || value == "true";
             } else {
                 bad = true;
             }
@@ -172,6 +174,8 @@ bool Overrides::save(const std::filesystem::path& file, std::string* error) cons
             }
             if (o.full)
                 out << " full=1";
+            if (o.bars)
+                out << " bars=1";
             out << "\n";
         }
         if (!out) {
@@ -200,6 +204,7 @@ struct Item {
     float x0, x1, y0, y1;
     Anchor forced;  // from an override (Auto: none, or an override that only adds)
     int override_index;
+    int list_index, poly_index;  // where it is, for bars drawn just before it
 };
 
 float anchor_x(Anchor a, float cx, bool edges) {
@@ -279,8 +284,10 @@ void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float a
     // Pass 2: the HUD pieces -- the rule's, plus what an override adds, minus what it stretches.
     std::vector<Item> items;
     std::unordered_map<int, Box> stretched;  // per override, for the snapshot
-    for (auto& list : frame.lists) {
-        for (const auto& p : list) {
+    for (std::size_t li = 0; li < frame.lists.size(); ++li) {
+        auto& list = frame.lists[li];
+        for (std::size_t pi = 0; pi < list.size(); ++pi) {
+            const auto& p = list[pi];
             float z;
             if (!flat(p, z))
                 continue;
@@ -312,7 +319,7 @@ void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float a
                     }
                     continue;
                 }
-                items.push_back({&p, x0, x1, y0, y1, a, m});
+                items.push_back({&p, x0, x1, y0, y1, a, m, static_cast<int>(li), static_cast<int>(pi)});
                 continue;
             }
             bool hud = eligible(p);
@@ -323,7 +330,7 @@ void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float a
             if (hud && x1 - x0 > rule.full_width)
                 hud = false;
             if (hud) {
-                items.push_back({&p, x0, x1, y0, y1, Anchor::Auto, -1});
+                items.push_back({&p, x0, x1, y0, y1, Anchor::Auto, -1, static_cast<int>(li), static_cast<int>(pi)});
             } else if (snapshot && x1 - x0 >= 2.0f && y1 - y0 >= 2.0f && x1 - x0 <= rule.full_width &&
                        (x1 - x0) * (y1 - y0) < backdrop_area && !(eligible(p) && cover[z] > backdrop_area)) {
                 // Offered for adding: flat pieces of a sensible size (not screen-wide strips or
@@ -469,6 +476,83 @@ void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float a
         pc.override_index = items[i].override_index;
         pc.tcws.push_back(texture_word(p));
         snapshot->pieces.push_back(std::move(pc));
+    }
+    // `bars=1`: fill the rest of the element's viewport with opaque black. The bars go just
+    // before the element in its display list, so they cover the picture behind it while the
+    // element itself (the sniper scope) still draws on top.
+    if (apply) {
+        struct Bars {
+            int list, poly;
+            std::vector<dream::render::Polygon> polys;
+        };
+        std::vector<Bars> all;
+        for (std::size_t r = 0; r < n; ++r) {
+            if (root(r) != r) continue;
+            const int oi = goverride[r];
+            if (oi < 0 || !overrides.items[static_cast<std::size_t>(oi)].bars) continue;
+            int first = -1;
+            for (std::size_t i = 0; i < n; ++i)
+                if (root(i) == r) {
+                    first = static_cast<int>(i);
+                    break;
+                }
+            if (first < 0) continue;
+            const float anchor = anchor_x(gforced[r], 0.5f * (gx0[r] + gx1[r]), edges);
+            const float cx0 = anchor + (gx0[r] - anchor) * k;
+            const float cx1 = anchor + (gx1[r] - anchor) * k;
+            const float w = gx1[r] - gx0[r], h = gy1[r] - gy0[r];
+            const float mx = 0.5f * (gx0[r] + gx1[r]), my = 0.5f * (gy0[r] + gy1[r]);
+            float vx0 = 0, vx1 = 640, vy0 = 0, vy1 = 480;
+            if (w >= 600.0f && h >= 400.0f) {
+                // full screen
+            } else if (w >= 300.0f && h >= 400.0f) {
+                vx0 = mx < 320.0f ? 0.0f : 320.0f;
+                vx1 = vx0 + 320.0f;
+            } else if (w >= 300.0f) {
+                vy0 = my < 240.0f ? 0.0f : 240.0f;
+                vy1 = vy0 + 240.0f;
+            } else {
+                vx0 = mx < 320.0f ? 0.0f : 320.0f;
+                vx1 = vx0 + 320.0f;
+                vy0 = my < 240.0f ? 0.0f : 240.0f;
+                vy1 = vy0 + 240.0f;
+            }
+            // Just in front of the picture but behind the scope/HUD: the translucent list is
+            // sorted far to near, so use a depth one step in front of the scope itself. The
+            // game's own HUD then still draws on top of the black bars.
+            const auto& scope_poly = *items[static_cast<std::size_t>(first)].poly;
+            const float scope_z = frame.vertices[scope_poly.first].z;
+            Bars bars{items[static_cast<std::size_t>(first)].list_index, 0, {}};
+            auto add = [&](float x0, float x1, float y0, float y1) {
+                if (x1 - x0 < 0.5f || y1 - y0 < 0.5f) return;
+                dream::render::Polygon bar;
+                bar.first = static_cast<std::uint32_t>(frame.vertices.size());
+                bar.count = 4;
+                bar.isp = (7u << 29) | (1u << 26);  // depth always, no depth writes or culling
+                bar.tsp = (1u << 29) | (2u << 22);  // source one, destination zero, no fog
+                for (auto point : {std::pair{x0, y0}, std::pair{x1, y0}, std::pair{x0, y1}, std::pair{x1, y1}}) {
+                    dream::render::Vertex v;
+                    v.x = point.first;
+                    v.y = point.second;
+                    v.z = scope_z - 1.0f;
+                    v.base = 0xff000000u;
+                    frame.vertices.push_back(v);
+                }
+                bars.polys.push_back(bar);
+            };
+            add(vx0, cx0, vy0, vy1);
+            add(cx1, vx1, vy0, vy1);
+            if (!bars.polys.empty()) all.push_back(std::move(bars));
+        }
+        // Insert from the end so earlier indices in the same list stay valid.
+        std::sort(all.begin(), all.end(), [](const Bars& a, const Bars& b) {
+            return a.list != b.list ? a.list > b.list : a.poly > b.poly;
+        });
+        for (auto& b : all) {
+            auto& list = frame.lists[static_cast<std::size_t>(b.list)];
+            const auto at = list.begin() + std::min<std::size_t>(static_cast<std::size_t>(b.poly), list.size());
+            list.insert(at, b.polys.begin(), b.polys.end());
+        }
     }
     if (snapshot) {
         for (auto& [m, b] : stretched) {

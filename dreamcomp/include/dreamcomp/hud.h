@@ -44,6 +44,10 @@ struct Override {
     // editor outline the whole screen as one element, 2026-10-07). For a full-screen picture
     // that is really 4:3 art (Jet Grind Radio's boot notice).
     bool full = false;
+    // `bars=1`: fill the rest of the element's viewport (the full screen, or its half/quadrant)
+    // with opaque black around the corrected rectangle. Used by the sniper scope, whose 4:3
+    // texture must keep its circular crosshair while the extra widescreen width is black.
+    bool bars = false;
     bool covers(float cx, float cy, std::uint32_t tcw) const noexcept;
 };
 
@@ -51,7 +55,7 @@ struct Override {
 struct Overrides {
     std::vector<Override> items;
     // Appends the file's entries (missing file: nothing, true). Lines:
-    //   rect=x0,y0,x1,y1 anchor=left|center|right|stretch [tcw=0x...,0x...] [full=1]  # comment
+    //   rect=x0,y0,x1,y1 anchor=left|center|right|stretch [tcw=0x...,0x...] [full=1] [bars=1]  # comment
     bool load(const std::filesystem::path& file, std::string* error = nullptr);
     bool save(const std::filesystem::path& file, std::string* error = nullptr) const;
     // Index, or -1. `wide`: the piece is wider than full_width (only `full` overrides match).
