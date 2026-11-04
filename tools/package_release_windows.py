@@ -42,7 +42,7 @@ def main() -> None:
     ap.add_argument("--sdl-dir", type=Path, default=Path("/tmp/opencode/sdl3-win/SDL3-3.4.18"))
     ap.add_argument("--linux-stage", type=Path, default=None,
                     help="a Linux release-stage folder to take license texts from")
-    ap.add_argument("--version", default="0.1.5")
+    ap.add_argument("--version", default="0.1.6")
     a = ap.parse_args()
     root = Path(__file__).resolve().parent.parent
     subprocess.run(["git", "-C", str(root), "diff", "--exit-code", "HEAD"], check=True)

@@ -1,3 +1,10 @@
+# v0.1.6 — Multiplayer radar fix
+
+- **Player 1's radar in split screen** now stays at the left edge with Player 2's. The
+  character-select name/emblem position fallbacks no longer catch the top radar or its own
+  arrow; overrides gained texture, size and texture-word range filters.
+- Includes the v0.1.5 radar-marker fix and the v0.1.4 sniper-scope and character-select fixes.
+
 # v0.1.5 — Radar marker fix
 
 - **Radar enemy markers:** the character-select dark-panel override also matched the radar's

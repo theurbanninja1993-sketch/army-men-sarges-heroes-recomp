@@ -43,7 +43,7 @@ def main():
     ap.add_argument('--build', type=Path, default=Path('build-release'))
     ap.add_argument('--sdl-prefix', type=Path, default=Path('/opt/sdl3'))
     ap.add_argument('--sdl-source', type=Path, default=Path('/opt/SDL'))
-    ap.add_argument('--version', default='0.1.5')
+    ap.add_argument('--version', default='0.1.6')
     a = ap.parse_args()
     root = Path(__file__).resolve().parent.parent
     subprocess.run(['git', '-C', str(root), 'diff', '--exit-code', 'HEAD'], check=True)

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(armymensh_recomp VERSION 0.1.5 LANGUAGES C CXX)
+project(armymensh_recomp VERSION 0.1.6 LANGUAGES C CXX)
 
 # Army Men: Sarge's Heroes (Dreamcast) as a native PC port, built with dreamcomp.
 # dreamcomp is the `dreamcomp/` submodule; a local checkout elsewhere can be used instead with
