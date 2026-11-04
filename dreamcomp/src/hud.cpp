@@ -74,16 +74,20 @@ bool parse(const std::string& s, Anchor& out) noexcept {
     return false;
 }
 
-bool Override::covers(float cx, float cy, std::uint32_t tcw) const noexcept {
+bool Override::covers(float cx, float cy, std::uint32_t tcw, float w, float h) const noexcept {
     if (cx < x0 || cx > x1 || cy < y0 || cy > y1)
+        return false;
+    if (min_w > 0 && w < min_w)
+        return false;
+    if (min_h > 0 && h < min_h)
         return false;
     return tcws.empty() || std::find(tcws.begin(), tcws.end(), tcw) != tcws.end();
 }
 
-int Overrides::match(float cx, float cy, std::uint32_t tcw, bool wide) const noexcept {
+int Overrides::match(float cx, float cy, std::uint32_t tcw, bool wide, float w, float h) const noexcept {
     for (int i = static_cast<int>(items.size()) - 1; i >= 0; --i) {
         const Override& o = items[static_cast<std::size_t>(i)];
-        if ((!wide || o.full) && o.covers(cx, cy, tcw))
+        if ((!wide || o.full) && o.covers(cx, cy, tcw, w, h))
             return i;
     }
     return -1;
@@ -130,6 +134,10 @@ bool Overrides::load(const std::filesystem::path& file, std::string* error) {
                 o.full = value == "1" || value == "true";
             } else if (key == "bars") {
                 o.bars = value == "1" || value == "true";
+            } else if (key == "min_w") {
+                o.min_w = std::strtof(value.c_str(), nullptr);
+            } else if (key == "min_h") {
+                o.min_h = std::strtof(value.c_str(), nullptr);
             } else {
                 bad = true;
             }
@@ -176,6 +184,10 @@ bool Overrides::save(const std::filesystem::path& file, std::string* error) cons
                 out << " full=1";
             if (o.bars)
                 out << " bars=1";
+            if (o.min_w > 0)
+                out << " min_w=" << o.min_w;
+            if (o.min_h > 0)
+                out << " min_h=" << o.min_h;
             out << "\n";
         }
         if (!out) {
@@ -294,7 +306,7 @@ void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float a
             float x0, x1, y0, y1;
             rect(p, x0, x1, y0, y1);
             const int m = any_overrides ? overrides.match(0.5f * (x0 + x1), 0.5f * (y0 + y1), texture_word(p),
-                                                          x1 - x0 > rule.full_width)
+                                                          x1 - x0 > rule.full_width, x1 - x0, y1 - y0)
                                         : -1;
             if (m >= 0) {
                 const Anchor a = overrides.items[static_cast<std::size_t>(m)].anchor;

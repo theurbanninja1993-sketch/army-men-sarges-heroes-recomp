@@ -125,3 +125,14 @@ rect=0,188,300,260 anchor=center   # emblem
 The name band stops above the emblem and below the header, so it does not split "Normal" or
 touch the right player. Both bands follow the centred green frame regardless of the texture
 word the game picks for that visit.
+
+## Radar enemy markers
+
+The in-game radar map is a textured 2D element; its enemy markers are small untextured quads
+(4x4 to 14x14) in the same screen area. The player-setup dark-panel override
+(`rect=30,250,614,448 anchor=center tcw=0`) also caught those markers, centring them while the
+radar itself was left-anchored, so at 16:9 they drifted outside the map.
+
+`min_w` / `min_h` now scope an override to pieces at least that size. The dark-panel override uses
+`min_w=100 min_h=100`: the 580x350 panel matches, the small markers do not. The markers then use
+the normal left-third rule and move with the radar. Verified with the HUD capture.

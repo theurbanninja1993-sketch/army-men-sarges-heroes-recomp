@@ -48,18 +48,24 @@ struct Override {
     // with opaque black around the corrected rectangle. Used by the sniper scope, whose 4:3
     // texture must keep its circular crosshair while the extra widescreen width is black.
     bool bars = false;
-    bool covers(float cx, float cy, std::uint32_t tcw) const noexcept;
+    // `min_w` / `min_h`: only match pieces at least this wide/tall. A rectangle that targets a
+    // large panel (the player-setup dark panel) can then ignore small HUD sprites in the same
+    // area (the radar's enemy markers).
+    float min_w = 0, min_h = 0;
+    bool covers(float cx, float cy, std::uint32_t tcw, float w = 0, float h = 0) const noexcept;
 };
 
 // Later entries win, so a player's file loaded after the port's overrides it.
 struct Overrides {
     std::vector<Override> items;
     // Appends the file's entries (missing file: nothing, true). Lines:
-    //   rect=x0,y0,x1,y1 anchor=left|center|right|stretch [tcw=0x...,0x...] [full=1] [bars=1]  # comment
+    //   rect=x0,y0,x1,y1 anchor=left|center|right|stretch [tcw=0x...,0x...] [full=1] [bars=1]
+    //   [min_w=N] [min_h=N]  # comment
     bool load(const std::filesystem::path& file, std::string* error = nullptr);
     bool save(const std::filesystem::path& file, std::string* error = nullptr) const;
     // Index, or -1. `wide`: the piece is wider than full_width (only `full` overrides match).
-    int match(float cx, float cy, std::uint32_t tcw, bool wide = false) const noexcept;
+    int match(float cx, float cy, std::uint32_t tcw, bool wide = false,
+              float w = 0, float h = 0) const noexcept;
 };
 
 // What the editor shows: one box per element (pieces grouped as the correction groups them) and,
