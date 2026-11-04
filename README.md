@@ -1,5 +1,6 @@
 # Army Men: Sarge's Heroes — Recompiled (Dreamcast)
 
+[![Get it on RecompLauncher](https://recomplauncher.com/assets/press/launcher/badge-dark.svg)](https://recomplauncher.com/game/army-men-sarges-heroes-recomp)
 [![Verified developer on RecompStore](https://recompstore.com/assets/press/verified-dark.svg)](https://recompstore.com/dev/theurbanninja1993-sketch)
 
 An unofficial native PC port of the Dreamcast version of **Army Men: Sarge's Heroes**, built
