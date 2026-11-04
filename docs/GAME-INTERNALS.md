@@ -8,6 +8,9 @@ are documented in [Native mouse camera](findings/mouse-camera.md).
 Widescreen camera projection/culling addresses and the interpolated ground-gap
 investigation: [widescreen-and-ground-gaps.md](findings/widescreen-and-ground-gaps.md).
 
+Multiplayer widescreen: player-setup text anchors and split-screen culling:
+[multiplayer-widescreen.md](findings/multiplayer-widescreen.md).
+
 Classic/Modern controller input and verification: [controller-camera.md](findings/controller-camera.md).
 
 High refresh rate presentation errors and the dark-blinking investigation:
