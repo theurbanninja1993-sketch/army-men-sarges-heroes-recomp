@@ -1,0 +1,85 @@
+diff --git a/include/dreamcomp/hud.h b/include/dreamcomp/hud.h
+index 7aadcbd..c26cf25 100644
+--- a/include/dreamcomp/hud.h
++++ b/include/dreamcomp/hud.h
+@@ -52,6 +52,14 @@ struct Override {
+     // large panel (the player-setup dark panel) can then ignore small HUD sprites in the same
+     // area (the radar's enemy markers).
+     float min_w = 0, min_h = 0;
++    // `max_w` / `max_h`: only pieces at most this wide/tall (0: any). `textured=1`: only pieces
++    // with a texture, never untextured colour quads (the radar's enemy markers).
++    float max_w = 0, max_h = 0;
++    bool textured = false;
++    // `tcw_min` / `tcw_max`: only texture words in this range (0 / 0xffffffff by default).
++    // Lets a text override stay on the font pages (0x04......) and ignore sprite pages
++    // (0x00......, such as the radar's own arrow).
++    std::uint32_t tcw_min = 0, tcw_max = 0xffffffffu;
+     bool covers(float cx, float cy, std::uint32_t tcw, float w = 0, float h = 0) const noexcept;
+ };
+ 
+@@ -60,7 +68,7 @@ struct Overrides {
+     std::vector<Override> items;
+     // Appends the file's entries (missing file: nothing, true). Lines:
+     //   rect=x0,y0,x1,y1 anchor=left|center|right|stretch [tcw=0x...,0x...] [full=1] [bars=1]
+-    //   [min_w=N] [min_h=N]  # comment
++    //   [min_w=N] [min_h=N] [max_w=N] [max_h=N] [textured=1] [tcw_min=0x...] [tcw_max=0x...]  # comment
+     bool load(const std::filesystem::path& file, std::string* error = nullptr);
+     bool save(const std::filesystem::path& file, std::string* error = nullptr) const;
+     // Index, or -1. `wide`: the piece is wider than full_width (only `full` overrides match).
+diff --git a/src/hud.cpp b/src/hud.cpp
+index c05fec1..542609b 100644
+--- a/src/hud.cpp
++++ b/src/hud.cpp
+@@ -81,6 +81,14 @@ bool Override::covers(float cx, float cy, std::uint32_t tcw, float w, float h) c
+         return false;
+     if (min_h > 0 && h < min_h)
+         return false;
++    if (max_w > 0 && w > max_w)
++        return false;
++    if (max_h > 0 && h > max_h)
++        return false;
++    if (textured && tcw == 0)
++        return false;
++    if (tcw < tcw_min || tcw > tcw_max)
++        return false;
+     return tcws.empty() || std::find(tcws.begin(), tcws.end(), tcw) != tcws.end();
+ }
+ 
+@@ -138,6 +146,16 @@ bool Overrides::load(const std::filesystem::path& file, std::string* error) {
+                 o.min_w = std::strtof(value.c_str(), nullptr);
+             } else if (key == "min_h") {
+                 o.min_h = std::strtof(value.c_str(), nullptr);
++            } else if (key == "max_w") {
++                o.max_w = std::strtof(value.c_str(), nullptr);
++            } else if (key == "max_h") {
++                o.max_h = std::strtof(value.c_str(), nullptr);
++            } else if (key == "textured") {
++                o.textured = value == "1" || value == "true";
++            } else if (key == "tcw_min") {
++                o.tcw_min = static_cast<std::uint32_t>(std::strtoul(value.c_str(), nullptr, 0));
++            } else if (key == "tcw_max") {
++                o.tcw_max = static_cast<std::uint32_t>(std::strtoul(value.c_str(), nullptr, 0));
+             } else {
+                 bad = true;
+             }
+@@ -188,6 +206,20 @@ bool Overrides::save(const std::filesystem::path& file, std::string* error) cons
+                 out << " min_w=" << o.min_w;
+             if (o.min_h > 0)
+                 out << " min_h=" << o.min_h;
++            if (o.max_w > 0)
++                out << " max_w=" << o.max_w;
++            if (o.max_h > 0)
++                out << " max_h=" << o.max_h;
++            if (o.textured)
++                out << " textured=1";
++            if (o.tcw_min) {
++                std::snprintf(buf, sizeof buf, " tcw_min=0x%08x", o.tcw_min);
++                out << buf;
++            }
++            if (o.tcw_max != 0xffffffffu) {
++                std::snprintf(buf, sizeof buf, " tcw_max=0x%08x", o.tcw_max);
++                out << buf;
++            }
+             out << "\n";
+         }
+         if (!out) {

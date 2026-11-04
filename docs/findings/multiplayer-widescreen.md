@@ -136,3 +136,15 @@ radar itself was left-anchored, so at 16:9 they drifted outside the map.
 `min_w` / `min_h` now scope an override to pieces at least that size. The dark-panel override uses
 `min_w=100 min_h=100`: the 580x350 panel matches, the small markers do not. The markers then use
 the normal left-third rule and move with the radar. Verified with the HUD capture.
+
+### Follow-up: the top player's radar in multiplayer
+
+The position-based name/emblem fallbacks had no texture filter, so in split screen they also
+caught the top player's radar (its centre falls in the name band) and the radar's own arrow (a
+small textured sprite). The top radar was centred while the bottom player's radar stayed
+left-anchored.
+
+The fallbacks are now scoped: `textured=1`, `max_w=40 max_h=40` for the name band, `min_w=20
+min_h=20` for the emblem, and `tcw_min=0x04000000` so only the font texture pages match. The radar
+(144x144) is too large, and its arrow uses a sprite page below the text range. Verified with the
+multiplayer HUD capture: both radars sit at the left edge and their markers stay inside.

@@ -81,6 +81,14 @@ bool Override::covers(float cx, float cy, std::uint32_t tcw, float w, float h) c
         return false;
     if (min_h > 0 && h < min_h)
         return false;
+    if (max_w > 0 && w > max_w)
+        return false;
+    if (max_h > 0 && h > max_h)
+        return false;
+    if (textured && tcw == 0)
+        return false;
+    if (tcw < tcw_min || tcw > tcw_max)
+        return false;
     return tcws.empty() || std::find(tcws.begin(), tcws.end(), tcw) != tcws.end();
 }
 
@@ -138,6 +146,16 @@ bool Overrides::load(const std::filesystem::path& file, std::string* error) {
                 o.min_w = std::strtof(value.c_str(), nullptr);
             } else if (key == "min_h") {
                 o.min_h = std::strtof(value.c_str(), nullptr);
+            } else if (key == "max_w") {
+                o.max_w = std::strtof(value.c_str(), nullptr);
+            } else if (key == "max_h") {
+                o.max_h = std::strtof(value.c_str(), nullptr);
+            } else if (key == "textured") {
+                o.textured = value == "1" || value == "true";
+            } else if (key == "tcw_min") {
+                o.tcw_min = static_cast<std::uint32_t>(std::strtoul(value.c_str(), nullptr, 0));
+            } else if (key == "tcw_max") {
+                o.tcw_max = static_cast<std::uint32_t>(std::strtoul(value.c_str(), nullptr, 0));
             } else {
                 bad = true;
             }
@@ -188,6 +206,20 @@ bool Overrides::save(const std::filesystem::path& file, std::string* error) cons
                 out << " min_w=" << o.min_w;
             if (o.min_h > 0)
                 out << " min_h=" << o.min_h;
+            if (o.max_w > 0)
+                out << " max_w=" << o.max_w;
+            if (o.max_h > 0)
+                out << " max_h=" << o.max_h;
+            if (o.textured)
+                out << " textured=1";
+            if (o.tcw_min) {
+                std::snprintf(buf, sizeof buf, " tcw_min=0x%08x", o.tcw_min);
+                out << buf;
+            }
+            if (o.tcw_max != 0xffffffffu) {
+                std::snprintf(buf, sizeof buf, " tcw_max=0x%08x", o.tcw_max);
+                out << buf;
+            }
             out << "\n";
         }
         if (!out) {

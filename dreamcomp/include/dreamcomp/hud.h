@@ -52,6 +52,14 @@ struct Override {
     // large panel (the player-setup dark panel) can then ignore small HUD sprites in the same
     // area (the radar's enemy markers).
     float min_w = 0, min_h = 0;
+    // `max_w` / `max_h`: only pieces at most this wide/tall (0: any). `textured=1`: only pieces
+    // with a texture, never untextured colour quads (the radar's enemy markers).
+    float max_w = 0, max_h = 0;
+    bool textured = false;
+    // `tcw_min` / `tcw_max`: only texture words in this range (0 / 0xffffffff by default).
+    // Lets a text override stay on the font pages (0x04......) and ignore sprite pages
+    // (0x00......, such as the radar's own arrow).
+    std::uint32_t tcw_min = 0, tcw_max = 0xffffffffu;
     bool covers(float cx, float cy, std::uint32_t tcw, float w = 0, float h = 0) const noexcept;
 };
 
@@ -60,7 +68,7 @@ struct Overrides {
     std::vector<Override> items;
     // Appends the file's entries (missing file: nothing, true). Lines:
     //   rect=x0,y0,x1,y1 anchor=left|center|right|stretch [tcw=0x...,0x...] [full=1] [bars=1]
-    //   [min_w=N] [min_h=N]  # comment
+    //   [min_w=N] [min_h=N] [max_w=N] [max_h=N] [textured=1] [tcw_min=0x...] [tcw_max=0x...]  # comment
     bool load(const std::filesystem::path& file, std::string* error = nullptr);
     bool save(const std::filesystem::path& file, std::string* error = nullptr) const;
     // Index, or -1. `wide`: the piece is wider than full_width (only `full` overrides match).
