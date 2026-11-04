@@ -111,8 +111,17 @@ picture (scope depth - 1) so the game's own HUD (face, radar, ammo) still draws 
 Verified with the single and multi captures: the crosshair is circular, the game picture outside
 the 4:3 scope is black, the other player's half is untouched, and the HUD remains visible.
 
-## Left emblem texture
+## Left name and emblem texture words
 
-The left player's emblem can use a different texture word than the one in the first capture, so
-the position-based `rect=0,188,300,260 anchor=center` override catches the emblem band even when
-the texture differs. It stops below the name lines so "Normal" is not split again.
+The left player's name and emblem can use different texture words than the first capture (per
+profile, and again after returning from a match to the set-up screen). Position-based overrides
+catch both bands with `anchor=center`:
+
+```
+rect=0,100,300,188 anchor=center   # name lines
+rect=0,188,300,260 anchor=center   # emblem
+```
+
+The name band stops above the emblem and below the header, so it does not split "Normal" or
+touch the right player. Both bands follow the centred green frame regardless of the texture
+word the game picks for that visit.
