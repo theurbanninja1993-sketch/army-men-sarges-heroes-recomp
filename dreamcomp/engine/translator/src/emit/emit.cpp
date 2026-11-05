@@ -1720,6 +1720,7 @@ EmitResult emit_unit(const Image& image, const std::vector<FunctionSpec>& functi
     src << "\n";
     // Pass 0: pool words the unit itself writes (run-time patched literals) are never folded.
     std::set<std::uint32_t> written;
+    for (const auto address : options.runtime_literals) written.insert(address & ~3u);
     {
         Summaries none;
         for (const auto& f : specs) {

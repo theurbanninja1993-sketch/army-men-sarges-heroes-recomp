@@ -96,6 +96,33 @@ bool finish(const toml::table& t, const std::filesystem::path& dir, GameConfig& 
         !get_str(t["disc"]["sha1_1st_read"], "disc.sha1_1st_read", c.sha1_1st_read, error, false) ||
         !get_str(t["disc"]["chd_sha1"], "disc.chd_sha1", c.chd_sha1, error, false))
         return false;
+    if (const auto node = t["disc"]["compatible_sha1_1st_read"]; node) {
+        const auto* hashes = node.as_array();
+        if (!hashes) {
+            error = "disc.compatible_sha1_1st_read must be an array of SHA-1 strings";
+            return false;
+        }
+        for (const auto& item : *hashes) {
+            const auto hash = item.value<std::string>();
+            if (!hash || hash->size() != 40 || hash->find_first_not_of("0123456789abcdef") != std::string::npos) {
+                error = "disc.compatible_sha1_1st_read entries must be 40 lowercase hexadecimal characters";
+                return false;
+            }
+            c.compatible_sha1_1st_read.push_back(*hash);
+        }
+    }
+    if (!c.compatible_sha1_1st_read.empty() && c.sha1_1st_read.empty()) {
+        error = "disc.compatible_sha1_1st_read requires disc.sha1_1st_read";
+        return false;
+    }
+    if (!get_u32_list(t["binary"]["runtime_literals"], "binary.runtime_literals", c.runtime_literals, error))
+        return false;
+    for (const auto address : c.runtime_literals) {
+        if (address & 1u) {
+            error = "binary.runtime_literals addresses must be even";
+            return false;
+        }
+    }
     c.disc_gdrom = t["disc"]["gdrom"].value_or(false);
     std::string disc_image;
     if (!get_str(t["disc"]["image"], "disc.image", disc_image, error, false))

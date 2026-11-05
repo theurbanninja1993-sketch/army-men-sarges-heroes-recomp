@@ -32,9 +32,16 @@ has not yet been validated separately.
 The Windows build is a console program, so a console window stays open with the log. Keep it while
 testing or reporting an issue.
 
-You must supply your own game. This build requires the matching Dreamcast executable revision
-**T-9715N V1.001**, boot SHA-1 `51384b12a9de6d9a44caecaadafd29dca86807cf`.
-Different releases or modified boot executables may be rejected. The image stays on your computer.
+You must supply your own game. The port supports these verified **T-9715N V1.001** executables:
+
+| Image contents | Boot executable SHA-1 |
+|---|---|
+| USA GD-ROM layout (including GDI/CHD dumps) | `5f49f40a0a30fe240d8868025201326b266e369b` |
+| Previously supported CDI copy | `51384b12a9de6d9a44caecaadafd29dca86807cf` |
+
+The executable hash, rather than the image extension or filename, determines compatibility.
+PAL and other revisions are not yet supported. Different or modified executables are rejected.
+The image stays on your computer.
 No disc image, extracted assets, BIOS, saves, or generated game source are distributed here.
 The release executable includes the compiled static translation and still requires your disc.
 

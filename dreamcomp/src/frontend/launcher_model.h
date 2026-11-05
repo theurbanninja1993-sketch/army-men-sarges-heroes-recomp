@@ -72,7 +72,8 @@ struct DiscCheck {
 // Opens `image`, reads the boot file named in IP.BIN and compares its SHA-1 with `expected`
 // (empty: nothing to compare against, NoReference). Takes a moment on a CHD: call it off the UI
 // thread.
-DiscCheck verify_disc(const std::filesystem::path& image, const std::string& expected);
+DiscCheck verify_disc(const std::filesystem::path& image, const std::string& expected,
+                      const std::vector<std::string>& compatible = {});
 bool disc_playable(const DiscCheck& c);
 
 // ---- texture packs ---------------------------------------------------------------------------

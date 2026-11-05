@@ -40,7 +40,7 @@
   ],
   "exit_codes": {
     "2": "It couldn't read that game image. Use your own Dreamcast copy as .cdi, .gdi (with its track files beside it), .cue (with its .bin) or .chd.",
-    "3": "That's a different release or revision. This recomp needs the USA Dreamcast release, product T-9715N V1.001."
+    "3": "That's a different release or revision. This recomp needs a supported T-9715N V1.001 executable (USA GD-ROM or the verified CDI copy). See the README for supported hashes."
   },
   "settings": [
     {

@@ -84,3 +84,10 @@ leaves the screen. The final hook writes 6000 ms and uses the same limit for its
 volume exception. Native stop/skip handling remains in use. The playable game
 was rebuilt. The longer replay above documents the earlier revision; listening
 confirmation of the final six-second cutoff is pending.
+
+## USA GD-ROM comparison (2026-11-05)
+
+The subsequently supplied USA CHD/CUE contains `CIN8_1.STR`; the earlier silence observation
+applies to the original CDI copy, which lacks that file. The startup extension now leaves the
+native soundtrack and cue untouched for the verified GD-ROM executable and retains the added
+rotor loop for the CDI. See `disc-revisions.md` for identities and synthetic cue regression tests.

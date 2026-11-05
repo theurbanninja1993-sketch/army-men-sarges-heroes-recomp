@@ -27,6 +27,16 @@ struct GameConfig {
 
     std::string id, title, region, product;
     std::string sha1_1st_read, chd_sha1;
+    // Exact, independently verified executables sharing this translation's code layout.
+    std::vector<std::string> compatible_sha1_1st_read;
+    bool accepts_boot_sha1(const std::string& sha) const {
+        if (sha1_1st_read.empty() || sha == sha1_1st_read) return true;
+        for (const auto& accepted : compatible_sha1_1st_read)
+            if (sha == accepted) return true;
+        return false;
+    }
+    // Literal-pool addresses whose values differ between compatible executable revisions.
+    std::vector<std::uint32_t> runtime_literals;
     bool disc_gdrom = false;  // [disc] gdrom: report the disc as GD-ROM whatever its layout
     std::optional<std::filesystem::path>
         disc_image;  // [disc] image, resolved; the GDI/CHD to mount

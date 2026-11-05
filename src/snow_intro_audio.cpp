@@ -1,7 +1,25 @@
 // Restore a rotor loop for the otherwise silent Snow drop-off cinematic.
 #include "dreamcomp/hook.h"
+#include "dream/runtime/host_ext.h"
+#include "dream/runtime/system.h"
+
+namespace {
+bool native_snow_soundtrack = false;
+struct SnowSoundtrack final : dream::host::Extension {
+    const char* name() const override { return "Army Men Snow soundtrack selection"; }
+    void on_start(dream::System& sys) override {
+        // The verified USA GD-ROM executable has this PVD FAD and includes CIN8_1.STR.
+        // The CDI copy omits that stream; only that copy needs our replacement rotor cue.
+        native_snow_soundtrack = sys.memory.read32(0x8c135eb8u) == 45166u;
+    }
+    void on_stop(dream::System&, const char*) override { native_snow_soundtrack = false; }
+};
+SnowSoundtrack snow_soundtrack;
+dream::host::Register register_snow_soundtrack(snow_soundtrack);
+} // namespace
 
 DC_HOOK_ENTRY(snow_intro_audio) {
+    if (native_snow_soundtrack) return false;
     // The native cinematic updater runs after the loaded ELF header is installed.
     // Restrict this edit to Snow Cnm00 and its known single helicopter cue.
     if (m.read32(0x8c18ed20u) != 8) return false;
@@ -32,6 +50,7 @@ DC_HOOK_ENTRY(snow_intro_audio) {
 }
 
 DC_HOOK_ENTRY(snow_intro_play) {
+    if (native_snow_soundtrack) return false;
     // Cinematics mute the normal SFX bus because their audio usually comes from
     // a streamed soundtrack. Let only this restored cue use the saved SFX level.
     if ((c.pr & 0x1fffffffu) != 0x0c055c4cu || c.r[5] != 33 || c.r[6] != 0 ||

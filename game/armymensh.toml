@@ -9,6 +9,8 @@ product = "T-9715N"
 
 [disc]
 sha1_1st_read = "51384b12a9de6d9a44caecaadafd29dca86807cf"   # the boot file this config was measured against
+# Original USA GD-ROM: same executable layout, with three different disc-address pool words.
+compatible_sha1_1st_read = ["5f49f40a0a30fe240d8868025201326b266e369b"]
 gdrom = true   # the game is GD-ROM (IP.BIN device "GD-ROM1/1"); the image is a CD-format copy
                  # whose tracks sit below LBA 45000, so the engine would otherwise report CD-ROM XA
                  # and the game loops on drive init (measured 2026-10-20)
@@ -18,6 +20,8 @@ path = "extracted/fs/1ST_READ.BIN"   # written by tools/dc.py setup, git-ignored
 load_address = 0x8C010000
 link_address = 0x0C010000
 entry = 0x8C010000
+# Read the selected executable's FAD/PVD constants instead of folding the CDI values.
+runtime_literals = [0x0C0F2DD0, 0x0C0F319C, 0x0C135EB8]
 
 # [[relocations]] and [functions] extra: paste from --suggest-config, with a comment saying how
 # each was found. [hooks]: see dreamcomp docs/HOOKS.md.

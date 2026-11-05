@@ -172,10 +172,10 @@ def cmd_setup(a) -> int:
     info = port_info(a.port)
     disc = os.path.abspath(a.disc)
     from_toml = open(info["toml"], encoding="utf-8").read()
-    want = None
-    for line in from_toml.splitlines():
-        if line.strip().startswith("sha1_1st_read"):
-            want = line.split("=", 1)[1].split("#")[0].strip().strip('"')
+    import tomllib  # Python 3.11+, as required by this port's source-build instructions
+    disc_config = tomllib.loads(from_toml).get("disc", {})
+    want = disc_config.get("sha1_1st_read")
+    accepted = {want, *disc_config.get("compatible_sha1_1st_read", [])}
     # Only the boot executable is extracted: the translator needs it at build time, and at run
     # time everything else is read off the disc image itself.
     sys.path.insert(0, os.path.join(ROOT, "engine", "tools", "dcdisc"))
@@ -189,8 +189,14 @@ def cmd_setup(a) -> int:
     if ip.hardware_id.startswith("SEGA SEGAKATANA") is False:
         print(f"warning: IP.BIN hardware id is {ip.hardware_id!r}")
     got = hashlib.sha1(data).hexdigest()
-    if want and got != want and hashlib.sha1(descramble(data)).hexdigest() == want:
-        data, got = descramble(data), want  # MIL-CD style scrambled boot file
+    if want and got not in accepted:
+        plain = descramble(data)
+        plain_sha = hashlib.sha1(plain).hexdigest()
+        if plain_sha in accepted:
+            data, got = plain, plain_sha  # MIL-CD style scrambled boot file
+    if want and got not in accepted:
+        sys.exit(f"boot binary SHA-1 {got} does not match this port's supported executables: "
+                 + ", ".join(sorted(accepted)) + ": wrong release or revision")
     out = os.path.join(info["dir"], "game", "extracted", "fs")
     os.makedirs(out, exist_ok=True)
     boot = os.path.join(out, "1ST_READ.BIN")
@@ -198,8 +204,6 @@ def cmd_setup(a) -> int:
         f.write(data)
     print(f"{ip.title} {ip.product_number} {ip.product_version}: boot file {ip.boot_filename}, "
           f"{len(data)} bytes -> {boot}")
-    if want and got != want:
-        sys.exit(f"boot binary SHA-1 {got} does not match this port ({want}): wrong release or revision")
     print(f"boot binary verified: sha1 {got}")
     info["local"]["disc"] = disc
     save_local(info)

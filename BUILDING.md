@@ -22,7 +22,8 @@ python3 dreamcomp/tools/dc.py build .
 The launcher/runtime supports CDI directly. The Python developer extraction tool currently
 requires GDI, CUE, or CHD; convert a CDI locally for a source build. Never upload converted tracks.
 
-The supported boot revision and SHA-1 are listed in README.md. Frontend dependencies are pinned
+The supported boot revisions and SHA-1 allowlist are listed in README.md. Both verified USA
+executables can be used for a source build; the three disc-address literals remain runtime reads. Frontend dependencies are pinned
 in `dreamcomp/cmake/DreamcompFrontend.cmake`. A source release includes copies under
 `third_party_sources/`; you may use CMake `FETCHCONTENT_SOURCE_DIR_DREAMCOMP_FREETYPE` and
 `FETCHCONTENT_SOURCE_DIR_DREAMCOMP_RMLUI` to point to those copies.
@@ -41,7 +42,7 @@ build a separate `build-release/` tree with `DREAMCOMP_DIR` pointing to the incl
 ## Windows
 
 Windows 10/11 x64. Install Visual Studio 2022 Build Tools with the C++ workload, LLVM
-(`clang-cl`), CMake, Ninja, Python 3.10+, and the Vulkan SDK. `dreamcomp/tools/dc.py` finds the
+(`clang-cl`), CMake, Ninja, Python 3.11+, and the Vulkan SDK. `dreamcomp/tools/dc.py` finds the
 toolchain and fetches SDL3 into `.deps/`.
 
 From the repository root, in a Developer Command Prompt, with your own matching GDI/CUE/CHD image:

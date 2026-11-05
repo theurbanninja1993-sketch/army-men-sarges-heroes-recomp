@@ -115,7 +115,8 @@ std::string cycle(const std::vector<Choice>& choices, const std::string& value, 
 
 // ---- disc ------------------------------------------------------------------------------------
 
-DiscCheck verify_disc(const std::filesystem::path& image, const std::string& expected) {
+DiscCheck verify_disc(const std::filesystem::path& image, const std::string& expected,
+                      const std::vector<std::string>& compatible) {
     DiscCheck c;
     c.path = image.string();
     c.expected_sha1 = expected;
@@ -142,7 +143,9 @@ DiscCheck verify_disc(const std::filesystem::path& image, const std::string& exp
     if (expected.empty())
         c.status = DiscStatus::NoReference;
     else
-        c.status = c.found_sha1 == expected ? DiscStatus::Verified : DiscStatus::WrongRevision;
+        c.status = (c.found_sha1 == expected ||
+                    std::find(compatible.begin(), compatible.end(), c.found_sha1) != compatible.end())
+                       ? DiscStatus::Verified : DiscStatus::WrongRevision;
     return c;
 }
 

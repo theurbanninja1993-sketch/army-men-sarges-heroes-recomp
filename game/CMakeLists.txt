@@ -51,3 +51,14 @@ target_sources(armymensh_disc_tests PRIVATE
   ${DREAMCOMP_ROOT}/src/settings.cpp)
 target_include_directories(armymensh_disc_tests PRIVATE
   ${DREAMCOMP_ROOT}/include ${DREAMCOMP_ROOT}/src/frontend)
+
+add_executable(armymensh_disc_revision_tests EXCLUDE_FROM_ALL
+  ${PROJECT_SOURCE_DIR}/tools/test_disc_revisions.cpp
+  ${PROJECT_SOURCE_DIR}/src/snow_intro_audio.cpp
+  ${DREAMCOMP_ROOT}/src/frontend/launcher_model.cpp
+  ${DREAMCOMP_ROOT}/src/settings.cpp)
+set_target_properties(armymensh_disc_revision_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tools")
+target_include_directories(armymensh_disc_revision_tests PRIVATE
+  ${DREAMCOMP_ROOT}/include ${DREAMCOMP_ROOT}/src/frontend)
+target_link_libraries(armymensh_disc_revision_tests PRIVATE dream::translator dream::runtime)
+target_compile_features(armymensh_disc_revision_tests PRIVATE cxx_std_20)

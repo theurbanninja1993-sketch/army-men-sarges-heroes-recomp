@@ -94,3 +94,15 @@ then re-check every row below (a row whose change upstream absorbed is moved to 
 ## Upstreamed
 
 None yet.
+
+## Compatible executable literal pools (Army Men, 2026-11-05)
+
+Config: `engine/translator/include/dream/translator/config/game_config.h`,
+`engine/translator/src/config/game_config.cpp` add a strict compatible SHA-1 list and explicit
+runtime literal addresses. `engine/translator/include/dream/translator/emit.h`,
+`engine/translator/src/emit/emit.cpp` and `engine/translator/src/main.cpp` keep those pool words
+out of constant folding. `engine/runtime/boot/boot_main.cpp` always loads/validates the selected
+disc's executable when a disc is supplied. Frontend verification and developer setup share the
+allowlist. This handles verified data-only differences; it does not authorize different code.
+
+Schema documentation for this change: `engine/docs/game-config.md`.

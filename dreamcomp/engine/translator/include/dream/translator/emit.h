@@ -59,6 +59,7 @@ struct EmitOptions {
     // for the default mode, chosen by its wrapper when the guest arrives in that mode (dreamcomp;
     // docs/emitter-design.md "Entry-mode clones"). Off: every such function keeps its runtime tests.
     bool fp_entry_clones = true;
+    std::vector<std::uint32_t> runtime_literals; // explicit pool words read from guest RAM
 };
 
 // A run of bytes inside a function that discovery never decoded. Often a literal pool, sometimes

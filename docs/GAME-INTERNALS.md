@@ -28,3 +28,9 @@ Native menu pointer controls and password keyboard input:
 
 Shrap building wall bleed in interpolated frames:
 [shrap-building-walls.md](findings/shrap-building-walls.md).
+
+## Verified executable variants (2026-11-05)
+
+The original CDI hash and USA GD-ROM hash share one translation after three disc-address pool
+words are made runtime reads. Disc identity, full-file comparison, loader validation and PAL
+multi-executable findings: [disc-revisions.md](findings/disc-revisions.md). PAL is not enabled.

@@ -1,0 +1,306 @@
+diff --git a/dreamcomp/docs/engine-changes.md b/dreamcomp/docs/engine-changes.md
+index 1234065..49ea64c 100644
+--- a/dreamcomp/docs/engine-changes.md
++++ b/dreamcomp/docs/engine-changes.md
+@@ -94,3 +94,15 @@ then re-check every row below (a row whose change upstream absorbed is moved to
+ ## Upstreamed
+ 
+ None yet.
++
++## Compatible executable literal pools (Army Men, 2026-11-05)
++
++Config: `engine/translator/include/dream/translator/config/game_config.h`,
++`engine/translator/src/config/game_config.cpp` add a strict compatible SHA-1 list and explicit
++runtime literal addresses. `engine/translator/include/dream/translator/emit.h`,
++`engine/translator/src/emit/emit.cpp` and `engine/translator/src/main.cpp` keep those pool words
++out of constant folding. `engine/runtime/boot/boot_main.cpp` always loads/validates the selected
++disc's executable when a disc is supplied. Frontend verification and developer setup share the
++allowlist. This handles verified data-only differences; it does not authorize different code.
++
++Schema documentation for this change: `engine/docs/game-config.md`.
+diff --git a/dreamcomp/engine/docs/game-config.md b/dreamcomp/engine/docs/game-config.md
+index 1cb3f2c..9a5a27f 100644
+--- a/dreamcomp/engine/docs/game-config.md
++++ b/dreamcomp/engine/docs/game-config.md
+@@ -94,3 +94,15 @@ become C++ identifiers (leading underscores dropped, other characters to `_`, ke
+ digit-first names prefixed `f_`); two functions with the same name get the address appended to the
+ second (`kmSetFogTable`, `kmSetFogTable_0c075b50`). Aliases match: a symbol at 0x8C010000 names the
+ function emitted at 0x0C010000. Crazy Taxi: 365 symbols, 355 functions named.
++
++## Compatible disc executables
++
++`[disc].compatible_sha1_1st_read` is an optional array of exact lowercase SHA-1 hashes for
++executables independently verified to share this translation's instruction/address layout. It
++requires the primary `sha1_1st_read`. Both launcher and direct runtime starts enforce the list.
++The selected disc supplies its own boot bytes even when a developer extraction is present.
++
++`[binary].runtime_literals` is an optional array of even literal-pool addresses. The translator
++reads those pool words from guest memory instead of embedding the build image's values. Use
++this for known data-only differences between compatible executables; it does not make changed
++instructions or moved functions compatible. Addresses must resolve inside the build image.
+diff --git a/dreamcomp/engine/runtime/boot/boot_main.cpp b/dreamcomp/engine/runtime/boot/boot_main.cpp
+index 8aad69b..bf3e90e 100644
+--- a/dreamcomp/engine/runtime/boot/boot_main.cpp
++++ b/dreamcomp/engine/runtime/boot/boot_main.cpp
+@@ -2071,11 +2071,9 @@ int main(int argc, char** argv) {
+             disc->set_type(dream::gdrom::DiscType::GdRom);
+     }
+     std::vector<char> bytes;
+-    if (std::ifstream in{cfg.binary_path, std::ios::binary}) {
+-        bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+-    } else if (disc) {
+-        // dreamcomp: no extracted copy beside the config, so take the boot file off the disc and
+-        // refuse anything but the exact build this executable was translated from.
++    if (disc) {
++        // Always load the selected disc's verified executable. A developer's extracted copy
++        // may belong to another compatible revision with different runtime literals.
+         std::vector<std::uint8_t> boot;
+         std::string boot_name;
+         if (!dream::gdrom::read_root_file(*disc, "", boot, &boot_name)) {
+@@ -2083,7 +2081,7 @@ int main(int argc, char** argv) {
+             return 2;
+         }
+         const std::string sha = dream::sha1_hex(boot.data(), boot.size());
+-        if (!cfg.sha1_1st_read.empty() && sha != cfg.sha1_1st_read) {
++        if (!cfg.accepts_boot_sha1(sha)) {
+             std::fprintf(stderr,
+                          "disc: %s has SHA-1 %s, but this build was made from %s.\n"
+                          "This is a different release or revision of the game; it cannot run "
+@@ -2092,6 +2090,8 @@ int main(int argc, char** argv) {
+             return 3;
+         }
+         bytes.assign(boot.begin(), boot.end());
++    } else if (std::ifstream in{cfg.binary_path, std::ios::binary}) {
++        bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+     } else {
+         std::fprintf(stderr, "cannot read %s\n", cfg.binary_path.string().c_str());
+         return 2;
+diff --git a/dreamcomp/engine/translator/include/dream/translator/config/game_config.h b/dreamcomp/engine/translator/include/dream/translator/config/game_config.h
+index ece3be3..ec8fe79 100644
+--- a/dreamcomp/engine/translator/include/dream/translator/config/game_config.h
++++ b/dreamcomp/engine/translator/include/dream/translator/config/game_config.h
+@@ -27,6 +27,16 @@ struct GameConfig {
+ 
+     std::string id, title, region, product;
+     std::string sha1_1st_read, chd_sha1;
++    // Exact, independently verified executables sharing this translation's code layout.
++    std::vector<std::string> compatible_sha1_1st_read;
++    bool accepts_boot_sha1(const std::string& sha) const {
++        if (sha1_1st_read.empty() || sha == sha1_1st_read) return true;
++        for (const auto& accepted : compatible_sha1_1st_read)
++            if (sha == accepted) return true;
++        return false;
++    }
++    // Literal-pool addresses whose values differ between compatible executable revisions.
++    std::vector<std::uint32_t> runtime_literals;
+     bool disc_gdrom = false;  // [disc] gdrom: report the disc as GD-ROM whatever its layout
+     std::optional<std::filesystem::path>
+         disc_image;  // [disc] image, resolved; the GDI/CHD to mount
+diff --git a/dreamcomp/engine/translator/include/dream/translator/emit.h b/dreamcomp/engine/translator/include/dream/translator/emit.h
+index 58b712c..5931bb7 100644
+--- a/dreamcomp/engine/translator/include/dream/translator/emit.h
++++ b/dreamcomp/engine/translator/include/dream/translator/emit.h
+@@ -59,6 +59,7 @@ struct EmitOptions {
+     // for the default mode, chosen by its wrapper when the guest arrives in that mode (dreamcomp;
+     // docs/emitter-design.md "Entry-mode clones"). Off: every such function keeps its runtime tests.
+     bool fp_entry_clones = true;
++    std::vector<std::uint32_t> runtime_literals; // explicit pool words read from guest RAM
+ };
+ 
+ // A run of bytes inside a function that discovery never decoded. Often a literal pool, sometimes
+diff --git a/dreamcomp/engine/translator/src/config/game_config.cpp b/dreamcomp/engine/translator/src/config/game_config.cpp
+index 43ae80a..df2c991 100644
+--- a/dreamcomp/engine/translator/src/config/game_config.cpp
++++ b/dreamcomp/engine/translator/src/config/game_config.cpp
+@@ -96,6 +96,33 @@ bool finish(const toml::table& t, const std::filesystem::path& dir, GameConfig&
+         !get_str(t["disc"]["sha1_1st_read"], "disc.sha1_1st_read", c.sha1_1st_read, error, false) ||
+         !get_str(t["disc"]["chd_sha1"], "disc.chd_sha1", c.chd_sha1, error, false))
+         return false;
++    if (const auto node = t["disc"]["compatible_sha1_1st_read"]; node) {
++        const auto* hashes = node.as_array();
++        if (!hashes) {
++            error = "disc.compatible_sha1_1st_read must be an array of SHA-1 strings";
++            return false;
++        }
++        for (const auto& item : *hashes) {
++            const auto hash = item.value<std::string>();
++            if (!hash || hash->size() != 40 || hash->find_first_not_of("0123456789abcdef") != std::string::npos) {
++                error = "disc.compatible_sha1_1st_read entries must be 40 lowercase hexadecimal characters";
++                return false;
++            }
++            c.compatible_sha1_1st_read.push_back(*hash);
++        }
++    }
++    if (!c.compatible_sha1_1st_read.empty() && c.sha1_1st_read.empty()) {
++        error = "disc.compatible_sha1_1st_read requires disc.sha1_1st_read";
++        return false;
++    }
++    if (!get_u32_list(t["binary"]["runtime_literals"], "binary.runtime_literals", c.runtime_literals, error))
++        return false;
++    for (const auto address : c.runtime_literals) {
++        if (address & 1u) {
++            error = "binary.runtime_literals addresses must be even";
++            return false;
++        }
++    }
+     c.disc_gdrom = t["disc"]["gdrom"].value_or(false);
+     std::string disc_image;
+     if (!get_str(t["disc"]["image"], "disc.image", disc_image, error, false))
+diff --git a/dreamcomp/engine/translator/src/emit/emit.cpp b/dreamcomp/engine/translator/src/emit/emit.cpp
+index 3023ce4..77528da 100644
+--- a/dreamcomp/engine/translator/src/emit/emit.cpp
++++ b/dreamcomp/engine/translator/src/emit/emit.cpp
+@@ -1720,6 +1720,7 @@ EmitResult emit_unit(const Image& image, const std::vector<FunctionSpec>& functi
+     src << "\n";
+     // Pass 0: pool words the unit itself writes (run-time patched literals) are never folded.
+     std::set<std::uint32_t> written;
++    for (const auto address : options.runtime_literals) written.insert(address & ~3u);
+     {
+         Summaries none;
+         for (const auto& f : specs) {
+diff --git a/dreamcomp/engine/translator/src/main.cpp b/dreamcomp/engine/translator/src/main.cpp
+index d697255..98a632c 100644
+--- a/dreamcomp/engine/translator/src/main.cpp
++++ b/dreamcomp/engine/translator/src/main.cpp
+@@ -524,6 +524,14 @@ int cmd_game(int argc, char** argv) {
+         std::fprintf(stderr, "cannot read %s\n", cfg.binary_path.string().c_str());
+         return 2;
+     }
++    for (const auto address : cfg.runtime_literals) {
++        const auto linked = to_link_space(cfg, address);
++        if (!img.contains(linked, 2)) {
++            std::fprintf(stderr, "runtime literal 0x%08x is outside the image\n", address);
++            return 2;
++        }
++        opt.runtime_literals.push_back(linked);
++    }
+     dream::translator::SymbolTable syms;
+     if (cfg.symbols && !dream::translator::load_symbols(*cfg.symbols, syms, err)) {
+         std::fprintf(stderr, "%s\n", err.c_str());
+diff --git a/dreamcomp/src/frontend/launcher_model.cpp b/dreamcomp/src/frontend/launcher_model.cpp
+index 845201e..d35f7e1 100644
+--- a/dreamcomp/src/frontend/launcher_model.cpp
++++ b/dreamcomp/src/frontend/launcher_model.cpp
+@@ -115,7 +115,8 @@ std::string cycle(const std::vector<Choice>& choices, const std::string& value,
+ 
+ // ---- disc ------------------------------------------------------------------------------------
+ 
+-DiscCheck verify_disc(const std::filesystem::path& image, const std::string& expected) {
++DiscCheck verify_disc(const std::filesystem::path& image, const std::string& expected,
++                      const std::vector<std::string>& compatible) {
+     DiscCheck c;
+     c.path = image.string();
+     c.expected_sha1 = expected;
+@@ -142,7 +143,9 @@ DiscCheck verify_disc(const std::filesystem::path& image, const std::string& exp
+     if (expected.empty())
+         c.status = DiscStatus::NoReference;
+     else
+-        c.status = c.found_sha1 == expected ? DiscStatus::Verified : DiscStatus::WrongRevision;
++        c.status = (c.found_sha1 == expected ||
++                    std::find(compatible.begin(), compatible.end(), c.found_sha1) != compatible.end())
++                       ? DiscStatus::Verified : DiscStatus::WrongRevision;
+     return c;
+ }
+ 
+diff --git a/dreamcomp/src/frontend/launcher_model.h b/dreamcomp/src/frontend/launcher_model.h
+index 4ab461c..7603a5a 100644
+--- a/dreamcomp/src/frontend/launcher_model.h
++++ b/dreamcomp/src/frontend/launcher_model.h
+@@ -72,7 +72,8 @@ struct DiscCheck {
+ // Opens `image`, reads the boot file named in IP.BIN and compares its SHA-1 with `expected`
+ // (empty: nothing to compare against, NoReference). Takes a moment on a CHD: call it off the UI
+ // thread.
+-DiscCheck verify_disc(const std::filesystem::path& image, const std::string& expected);
++DiscCheck verify_disc(const std::filesystem::path& image, const std::string& expected,
++                      const std::vector<std::string>& compatible = {});
+ bool disc_playable(const DiscCheck& c);
+ 
+ // ---- texture packs ---------------------------------------------------------------------------
+diff --git a/dreamcomp/src/frontend/menu_ui.cpp b/dreamcomp/src/frontend/menu_ui.cpp
+index f5e91d9..25f6444 100644
+--- a/dreamcomp/src/frontend/menu_ui.cpp
++++ b/dreamcomp/src/frontend/menu_ui.cpp
+@@ -422,14 +422,17 @@ void MenuUi::start_verify(bool sync) {
+         return;
+     }
+     const std::string expected = game_ok_ ? game_.sha1_1st_read : std::string();
++    const auto compatible = game_ok_ ? game_.compatible_sha1_1st_read : std::vector<std::string>{};
+     const auto p = std::filesystem::u8path(path);
+     if (sync) {
+-        disc_ = verify_disc(p, expected);
++        disc_ = verify_disc(p, expected, compatible);
+         verifying_ = false;
+         return;
+     }
+     verifying_ = true;
+-    verify_ = std::async(std::launch::async, [p, expected] { return verify_disc(p, expected); });
++    verify_ = std::async(std::launch::async, [p, expected, compatible] {
++        return verify_disc(p, expected, compatible);
++    });
+ }
+ 
+ void MenuUi::verify_now() {
+@@ -448,7 +451,8 @@ void MenuUi::disc_picked(const std::string& path) {
+     // Loading a disc is an action, not a setting: it is checked at once and, when it is the right
+     // one, remembered at once. A wrong one is explained in a message and not kept.
+     const std::string expected = game_ok_ ? game_.sha1_1st_read : std::string();
+-    const DiscCheck c = verify_disc(std::filesystem::u8path(path), expected);
++    const auto compatible = game_ok_ ? game_.compatible_sha1_1st_read : std::vector<std::string>{};
++    const DiscCheck c = verify_disc(std::filesystem::u8path(path), expected, compatible);
+     const std::string file = u8(std::filesystem::u8path(path).filename());
+     if (disc_playable(c)) {
+         disc_ = c;
+@@ -464,7 +468,7 @@ void MenuUi::disc_picked(const std::string& path) {
+     if (c.status == DiscStatus::WrongRevision) {
+         modal_ = {"Wrong release or revision",
+                   file + " is a different release or revision of " + title() +
+-                      ". This port is built for one exact version and cannot run another.",
++                      ". Its boot executable does not match a version supported by this port.",
+                   "disc&#160;&#160;" + esc(c.found_sha1) + "<br/>expected&#160;&#160;" +
+                       esc(c.expected_sha1)};
+     } else {
+diff --git a/dreamcomp/tools/dc.py b/dreamcomp/tools/dc.py
+index d941e6c..d3a0833 100644
+--- a/dreamcomp/tools/dc.py
++++ b/dreamcomp/tools/dc.py
+@@ -172,10 +172,10 @@ def cmd_setup(a) -> int:
+     info = port_info(a.port)
+     disc = os.path.abspath(a.disc)
+     from_toml = open(info["toml"], encoding="utf-8").read()
+-    want = None
+-    for line in from_toml.splitlines():
+-        if line.strip().startswith("sha1_1st_read"):
+-            want = line.split("=", 1)[1].split("#")[0].strip().strip('"')
++    import tomllib  # Python 3.11+, as required by this port's source-build instructions
++    disc_config = tomllib.loads(from_toml).get("disc", {})
++    want = disc_config.get("sha1_1st_read")
++    accepted = {want, *disc_config.get("compatible_sha1_1st_read", [])}
+     # Only the boot executable is extracted: the translator needs it at build time, and at run
+     # time everything else is read off the disc image itself.
+     sys.path.insert(0, os.path.join(ROOT, "engine", "tools", "dcdisc"))
+@@ -189,8 +189,14 @@ def cmd_setup(a) -> int:
+     if ip.hardware_id.startswith("SEGA SEGAKATANA") is False:
+         print(f"warning: IP.BIN hardware id is {ip.hardware_id!r}")
+     got = hashlib.sha1(data).hexdigest()
+-    if want and got != want and hashlib.sha1(descramble(data)).hexdigest() == want:
+-        data, got = descramble(data), want  # MIL-CD style scrambled boot file
++    if want and got not in accepted:
++        plain = descramble(data)
++        plain_sha = hashlib.sha1(plain).hexdigest()
++        if plain_sha in accepted:
++            data, got = plain, plain_sha  # MIL-CD style scrambled boot file
++    if want and got not in accepted:
++        sys.exit(f"boot binary SHA-1 {got} does not match this port's supported executables: "
++                 + ", ".join(sorted(accepted)) + ": wrong release or revision")
+     out = os.path.join(info["dir"], "game", "extracted", "fs")
+     os.makedirs(out, exist_ok=True)
+     boot = os.path.join(out, "1ST_READ.BIN")
+@@ -198,8 +204,6 @@ def cmd_setup(a) -> int:
+         f.write(data)
+     print(f"{ip.title} {ip.product_number} {ip.product_version}: boot file {ip.boot_filename}, "
+           f"{len(data)} bytes -> {boot}")
+-    if want and got != want:
+-        sys.exit(f"boot binary SHA-1 {got} does not match this port ({want}): wrong release or revision")
+     print(f"boot binary verified: sha1 {got}")
+     info["local"]["disc"] = disc
+     save_local(info)

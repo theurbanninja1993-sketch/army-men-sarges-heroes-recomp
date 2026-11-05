@@ -524,6 +524,14 @@ int cmd_game(int argc, char** argv) {
         std::fprintf(stderr, "cannot read %s\n", cfg.binary_path.string().c_str());
         return 2;
     }
+    for (const auto address : cfg.runtime_literals) {
+        const auto linked = to_link_space(cfg, address);
+        if (!img.contains(linked, 2)) {
+            std::fprintf(stderr, "runtime literal 0x%08x is outside the image\n", address);
+            return 2;
+        }
+        opt.runtime_literals.push_back(linked);
+    }
     dream::translator::SymbolTable syms;
     if (cfg.symbols && !dream::translator::load_symbols(*cfg.symbols, syms, err)) {
         std::fprintf(stderr, "%s\n", err.c_str());

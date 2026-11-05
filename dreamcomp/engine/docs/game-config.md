@@ -94,3 +94,15 @@ become C++ identifiers (leading underscores dropped, other characters to `_`, ke
 digit-first names prefixed `f_`); two functions with the same name get the address appended to the
 second (`kmSetFogTable`, `kmSetFogTable_0c075b50`). Aliases match: a symbol at 0x8C010000 names the
 function emitted at 0x0C010000. Crazy Taxi: 365 symbols, 355 functions named.
+
+## Compatible disc executables
+
+`[disc].compatible_sha1_1st_read` is an optional array of exact lowercase SHA-1 hashes for
+executables independently verified to share this translation's instruction/address layout. It
+requires the primary `sha1_1st_read`. Both launcher and direct runtime starts enforce the list.
+The selected disc supplies its own boot bytes even when a developer extraction is present.
+
+`[binary].runtime_literals` is an optional array of even literal-pool addresses. The translator
+reads those pool words from guest memory instead of embedding the build image's values. Use
+this for known data-only differences between compatible executables; it does not make changed
+instructions or moved functions compatible. Addresses must resolve inside the build image.

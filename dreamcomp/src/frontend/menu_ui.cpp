@@ -422,14 +422,17 @@ void MenuUi::start_verify(bool sync) {
         return;
     }
     const std::string expected = game_ok_ ? game_.sha1_1st_read : std::string();
+    const auto compatible = game_ok_ ? game_.compatible_sha1_1st_read : std::vector<std::string>{};
     const auto p = std::filesystem::u8path(path);
     if (sync) {
-        disc_ = verify_disc(p, expected);
+        disc_ = verify_disc(p, expected, compatible);
         verifying_ = false;
         return;
     }
     verifying_ = true;
-    verify_ = std::async(std::launch::async, [p, expected] { return verify_disc(p, expected); });
+    verify_ = std::async(std::launch::async, [p, expected, compatible] {
+        return verify_disc(p, expected, compatible);
+    });
 }
 
 void MenuUi::verify_now() {
@@ -448,7 +451,8 @@ void MenuUi::disc_picked(const std::string& path) {
     // Loading a disc is an action, not a setting: it is checked at once and, when it is the right
     // one, remembered at once. A wrong one is explained in a message and not kept.
     const std::string expected = game_ok_ ? game_.sha1_1st_read : std::string();
-    const DiscCheck c = verify_disc(std::filesystem::u8path(path), expected);
+    const auto compatible = game_ok_ ? game_.compatible_sha1_1st_read : std::vector<std::string>{};
+    const DiscCheck c = verify_disc(std::filesystem::u8path(path), expected, compatible);
     const std::string file = u8(std::filesystem::u8path(path).filename());
     if (disc_playable(c)) {
         disc_ = c;
@@ -464,7 +468,7 @@ void MenuUi::disc_picked(const std::string& path) {
     if (c.status == DiscStatus::WrongRevision) {
         modal_ = {"Wrong release or revision",
                   file + " is a different release or revision of " + title() +
-                      ". This port is built for one exact version and cannot run another.",
+                      ". Its boot executable does not match a version supported by this port.",
                   "disc&#160;&#160;" + esc(c.found_sha1) + "<br/>expected&#160;&#160;" +
                       esc(c.expected_sha1)};
     } else {

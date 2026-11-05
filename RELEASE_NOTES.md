@@ -1,3 +1,31 @@
+# v0.1.7 — USA disc compatibility
+
+- Adds support for the USA GD-ROM executable with SHA-1
+  `5f49f40a0a30fe240d8868025201326b266e369b`, including the verified USA CHD and CUE/BIN sets.
+  This fixes the matching executable-hash error reported through RecompLauncher.
+- Keeps support for the original CDI executable, SHA-1
+  `51384b12a9de6d9a44caecaadafd29dca86807cf`.
+- Reads three disc-address constants from the selected executable instead of baking in the CDI
+  values. Both verified executables share the same translated instructions and hook addresses.
+  The selected image supplies its own boot bytes even if a developer extraction is present.
+- Preserves the USA GD-ROM's native Snow intro soundtrack. The CDI retains its added six-second
+  helicopter cue, since that copy lacks the native stream.
+- **PAL/Europe is not supported yet.** Its language/video-mode launcher and secondary executables
+  need a separate translation and enhancement mappings. Unknown executable hashes remain rejected.
+- Includes the existing v0.1.6 multiplayer radar and earlier widescreen fixes.
+
+Linux and Windows downloads are included. USA CHD and CUE/BIN boot checks passed on Linux and
+under Wine for the Windows build; all 14 first-mission mouse/camera checks passed on USA CHD.
+Native Windows gameplay testing of this compatibility update remains pending.
+
+Your own matching Dreamcast image is required. No disc images, extracted game assets, BIOS,
+saves, captures, or generated game source are included. The executable contains the compiled
+static translation. Matching source and dependency notices accompany the binaries.
+
+**AI use disclosure:** development used extensive AI coding assistance for code, analysis,
+debugging, tests, and documentation, directed and tested by the maintainer. Bugs may remain.
+Project-specific original code is **GPL-2.0-or-later**; dependencies retain their own licenses.
+
 # v0.1.6 — Multiplayer radar fix
 
 - **Player 1's radar in split screen** now stays at the left edge with Player 2's. The

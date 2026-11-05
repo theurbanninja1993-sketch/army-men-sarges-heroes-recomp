@@ -2071,11 +2071,9 @@ int main(int argc, char** argv) {
             disc->set_type(dream::gdrom::DiscType::GdRom);
     }
     std::vector<char> bytes;
-    if (std::ifstream in{cfg.binary_path, std::ios::binary}) {
-        bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-    } else if (disc) {
-        // dreamcomp: no extracted copy beside the config, so take the boot file off the disc and
-        // refuse anything but the exact build this executable was translated from.
+    if (disc) {
+        // Always load the selected disc's verified executable. A developer's extracted copy
+        // may belong to another compatible revision with different runtime literals.
         std::vector<std::uint8_t> boot;
         std::string boot_name;
         if (!dream::gdrom::read_root_file(*disc, "", boot, &boot_name)) {
@@ -2083,7 +2081,7 @@ int main(int argc, char** argv) {
             return 2;
         }
         const std::string sha = dream::sha1_hex(boot.data(), boot.size());
-        if (!cfg.sha1_1st_read.empty() && sha != cfg.sha1_1st_read) {
+        if (!cfg.accepts_boot_sha1(sha)) {
             std::fprintf(stderr,
                          "disc: %s has SHA-1 %s, but this build was made from %s.\n"
                          "This is a different release or revision of the game; it cannot run "
@@ -2092,6 +2090,8 @@ int main(int argc, char** argv) {
             return 3;
         }
         bytes.assign(boot.begin(), boot.end());
+    } else if (std::ifstream in{cfg.binary_path, std::ios::binary}) {
+        bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
     } else {
         std::fprintf(stderr, "cannot read %s\n", cfg.binary_path.string().c_str());
         return 2;
