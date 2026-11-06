@@ -31,8 +31,7 @@ in `dreamcomp/cmake/DreamcompFrontend.cmake`. A source release includes copies u
 ## Release build
 
 `tools/release/Dockerfile` defines an Ubuntu 24.04 toolchain with SDL 3.4.18. The release uses
-Clang, Release mode, and the default interpreter fallback (matching the tested development
-build). Game extraction/translation happens locally; none of its output belongs in a source
+Clang, Release mode, and `DREAM_DEV_INTERPRETER=OFF` for release validation. Game extraction/translation happens locally; none of its output belongs in a source
 archive. Release packages contain the compiled executable but no standalone game files.
 
 Build the toolchain image with `docker build -t armymensh-release tools/release` and use it to
@@ -79,3 +78,25 @@ The source archive also contains the translation-input configs, never their bina
 The PAL preview constrains startup to English/60 Hz; this does not implement the other
 languages or 50 Hz. `ARMYMENSH_PAL_PROBE` and `DREAM_DEV_INTERPRETER=ON` remain opt-in developer
 investigation tools and must not be used for the published release build.
+
+
+### PAL English60 Windows test build
+
+Use the same verified PAL extraction and `ARMYMENSH_PAL_SUPPORT=ON` configuration
+with the Windows toolchain and `DREAM_DEV_INTERPRETER=OFF`. Build both
+`armymensh_boot` and `armymensh_pal_controls`; the generated translations and HUD
+rules are shared with Linux. For a Linux cross-build, put the native Linux
+`dream-translate` on PATH so translation custom commands execute on the host.
+
+Package with:
+
+```sh
+python3 tools/package_release_windows.py --pal --version 0.1.8-pal-windows-test.1
+```
+
+The ZIP includes both executables, SDL3.dll, bootstrap
+configuration, separate region HUD rules, frontend assets and license texts.
+Run `army-men-sarges-heroes-recomp.exe` and select the PAL disc in the normal
+launcher. English/60 Hz is enforced, and PAL keeps its separate default memory
+card. Native Windows gameplay testing is required before publishing PAL Windows
+support; Wine checks alone do not establish it.

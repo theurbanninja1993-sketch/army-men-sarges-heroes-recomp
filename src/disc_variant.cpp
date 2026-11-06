@@ -49,7 +49,7 @@ void army_prepare_variant(std::vector<std::string>& args) {
     auto config=dir/"armymensh_pal_probe.toml";
     if(!std::filesystem::exists(config)) config=dir.parent_path().parent_path()/"game/armymensh_pal_probe.toml";
     if(!std::filesystem::exists(program) || !std::filesystem::exists(config)) {
-        std::fprintf(stderr,"PAL preview: this package has no PAL runtime. Install the Linux PAL preview package.\nExpected runtime: %s\nConfig: %s\n",program.string().c_str(),config.string().c_str());
+        std::fprintf(stderr,"PAL preview: this package has no PAL runtime. Install the PAL preview package for your platform.\nExpected runtime: %s\nConfig: %s\n",program.string().c_str(),config.string().c_str());
         std::exit(3);
     }
     auto child=args;

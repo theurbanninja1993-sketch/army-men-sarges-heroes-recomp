@@ -16,7 +16,7 @@ The **v0.1.8-pal-preview.1** prerelease adds the verified European **T9708D V1.0
 Use the same executable and Load Game screen; the launcher detects your disc automatically.
 The preview always loads **English at 60 Hz**. The original startup language/video choices
 are overridden: other languages and 50 Hz are not implemented and previously crashed.
-PAL support for Windows is coming soon; the existing Windows stable release supports USA discs.
+PAL support for Windows is being tested; the existing Windows stable release supports USA discs.
 
 Player testing covers the complete first campaign level and loading/brief gameplay in every
 PAL mission, reported to run at full speed. Snow's helicopter audio was also checked.
@@ -28,6 +28,14 @@ unverified; please report the level/map and reproduction steps with any issues.
 PAL has a separate default memory card in `dreamcomp/armymensh_pal_en60`; launcher settings
 remain shared. Existing cards are not converted between regions. A custom `--vmu` path is
 respected.
+
+### Windows PAL test package
+
+The Windows PAL English/60 Hz test package is for native Windows validation before release.
+Extract the complete ZIP and run `army-men-sarges-heroes-recomp.exe`, then select your PAL
+disc normally. Keep `armymensh_pal_controls.exe`, `SDL3.dll`, the configuration files and
+`frontend` folder together. Both USA and PAL are included; PAL uses a separate default memory
+card. This test package has not yet been confirmed through gameplay on native Windows.
 
 ## Play
 
@@ -57,10 +65,10 @@ You must supply your own game. The port supports these verified executables (USA
 |---|---|
 | USA GD-ROM layout (including GDI/CHD dumps) | `5f49f40a0a30fe240d8868025201326b266e369b` |
 | Previously supported CDI copy | `51384b12a9de6d9a44caecaadafd29dca86807cf` |
-| PAL T9708D V1.001 (Linux preview, English/60 Hz only) | `7e1288a58f26eedf76cc7bdbaeb53a72a9332fbc` |
+| PAL T9708D V1.001 (English/60 Hz preview only) | `7e1288a58f26eedf76cc7bdbaeb53a72a9332fbc` |
 
 The executable hash, rather than the image extension or filename, determines compatibility.
-PAL requires the Linux preview package. Other revisions and modified game executables are rejected.
+PAL requires a matching preview package for your platform. Other revisions and modified game executables are rejected.
 PAL verification also checks the English60 secondary executable and transfer payload.
 The image stays on your computer.
 No disc image, extracted assets, BIOS, saves, or generated game source are distributed here.

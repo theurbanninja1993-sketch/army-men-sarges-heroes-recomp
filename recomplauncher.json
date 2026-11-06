@@ -5,7 +5,7 @@
   "repo": "theurbanninja1993-sketch/army-men-sarges-heroes-recomp",
   "game": {
     "kind": "iso",
-    "label": "Your own Dreamcast image (.cdi, .gdi, .cue or .chd): supported USA revision or PAL T9708D V1.001 (English/60 Hz preview, Linux only).",
+    "label": "Your own Dreamcast image (.cdi, .gdi, .cue or .chd): supported USA revision or PAL T9708D V1.001 (English/60 Hz preview; see README for platforms).",
     "check": {}
   },
   "start": {
@@ -42,7 +42,7 @@
   ],
   "exit_codes": {
     "2": "It couldn't read that game image. Use your own Dreamcast copy as .cdi, .gdi (with its track files beside it), .cue (with its .bin) or .chd.",
-    "3": "Unsupported disc revision, modified PAL game payload, or missing PAL runtime. PAL needs the Linux preview package and the verified T9708D V1.001 disc. See README for supported hashes."
+    "3": "Unsupported disc revision, modified PAL game payload, or missing PAL runtime. PAL needs the matching preview package for your platform and the verified T9708D V1.001 disc. See README for supported hashes."
   },
   "settings": [
     {

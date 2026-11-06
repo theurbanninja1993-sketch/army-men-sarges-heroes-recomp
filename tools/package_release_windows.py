@@ -42,7 +42,8 @@ def main() -> None:
     ap.add_argument("--sdl-dir", type=Path, default=Path("/tmp/opencode/sdl3-win/SDL3-3.4.18"))
     ap.add_argument("--linux-stage", type=Path, default=None,
                     help="a Linux release-stage folder to take license texts from")
-    ap.add_argument("--version", default="0.1.7")
+    ap.add_argument("--version", default="0.1.8-pal-windows-test.1")
+    ap.add_argument("--pal", action="store_true", help="include the PAL English60 preview runtime")
     a = ap.parse_args()
     root = Path(__file__).resolve().parent.parent
     subprocess.run(["git", "-C", str(root), "diff", "--exit-code", "HEAD"], check=True)
@@ -61,6 +62,11 @@ def main() -> None:
     shutil.copytree(build / "game/frontend", tree / "frontend")
     copy(root / "game/armymensh.toml", tree / "armymensh.toml")
     copy(root / "game/hud_overrides.ini", tree / "hud_overrides.ini")
+    if a.pal:
+        copy(build / "game/armymensh_pal_controls.exe", tree / "armymensh_pal_controls.exe")
+        for name in ["armymensh_pal_probe.toml", "hud_overrides_pal_en60.ini"]:
+            copy(root / "game" / name, tree / name)
+
     copy(root / "recomplauncher.json", tree / "recomplauncher.json")
     for name in ["README.md", "BUILDING.md", "LICENSE", "LICENSE-NOTICE.md", "THIRD_PARTY_NOTICES.md"]:
         copy(root / name, tree / name)
@@ -100,6 +106,7 @@ def main() -> None:
         "source_commit": commit,
         "build": "cross-compiled on Linux with clang-cl + lld-link, MSVC CRT/STL and Windows SDK from xwin",
         "runtime": "MSVC C/C++ runtime linked statically; SDL3 bundled; Vulkan from the GPU driver",
+        "pal_english_60hz_preview": a.pal,
         "game_assets_included": False,
         "compiled_static_translation_in_executable": True,
     }
@@ -111,6 +118,8 @@ def main() -> None:
     root_files = {EXE, DLL, "armymensh.toml", "hud_overrides.ini", "recomplauncher.json",
                   "README.md", "BUILDING.md", "LICENSE", "LICENSE-NOTICE.md",
                   "THIRD_PARTY_NOTICES.md", "BUILD-INFO.json", "MANIFEST.sha256"}
+    if a.pal:
+        root_files |= {"armymensh_pal_controls.exe", "armymensh_pal_probe.toml", "hud_overrides_pal_en60.ini"}
     for p in tree.rglob("*"):
         if not p.is_file():
             continue
