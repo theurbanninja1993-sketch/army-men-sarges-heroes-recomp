@@ -62,6 +62,9 @@ void call_indirect(Ctx& c, ::dream::Memory& m, std::uint32_t target);
 // run_guest runs the program from `entry` until control returns to the PR it was started with,
 // re-entering translated code through resume_at after every non-local return.
 [[noreturn]] void nonlocal_return(Ctx& c, ::dream::Memory& m, std::uint32_t pc);
+// Overlay tail edges must return immediately after this call. At the runner boundary it
+// defers the next PC without an exception; nested calls still unwind normally.
+void tail_transfer(Ctx& c, ::dream::Memory& m, std::uint32_t pc);
 void resume_at(Ctx& c, ::dream::Memory& m, std::uint32_t pc);
 void resume_miss(Ctx& c, ::dream::Memory& m, std::uint32_t pc);
 void run_guest(Ctx& c, ::dream::Memory& m, std::uint32_t entry);

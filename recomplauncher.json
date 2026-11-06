@@ -5,7 +5,7 @@
   "repo": "theurbanninja1993-sketch/army-men-sarges-heroes-recomp",
   "game": {
     "kind": "iso",
-    "label": "Your own Dreamcast image (.cdi, .gdi, .cue or .chd), USA release T-9715N V1.001.",
+    "label": "Your own Dreamcast image (.cdi, .gdi, .cue or .chd): supported USA revision or PAL T9708D V1.001 (English/60 Hz preview, Linux only).",
     "check": {}
   },
   "start": {
@@ -32,15 +32,17 @@
     }
   ],
   "folders": {
-    "saves": [{ "path": "{config}/dreamcomp/armymensh" }]
+    "saves": [{ "path": "{config}/dreamcomp/armymensh" },
+              { "path": "{config}/dreamcomp/armymensh_pal_en60" }]
   },
   "saves": [
     "{config}/dreamcomp/armymensh/vmu_a1.bin",
-    "{config}/dreamcomp/armymensh/settings.ini"
+    "{config}/dreamcomp/armymensh/settings.ini",
+    "{config}/dreamcomp/armymensh_pal_en60/vmu_a1.bin"
   ],
   "exit_codes": {
     "2": "It couldn't read that game image. Use your own Dreamcast copy as .cdi, .gdi (with its track files beside it), .cue (with its .bin) or .chd.",
-    "3": "That's a different release or revision. This recomp needs a supported T-9715N V1.001 executable (USA GD-ROM or the verified CDI copy). See the README for supported hashes."
+    "3": "Unsupported disc revision, modified PAL game payload, or missing PAL runtime. PAL needs the Linux preview package and the verified T9708D V1.001 disc. See README for supported hashes."
   },
   "settings": [
     {

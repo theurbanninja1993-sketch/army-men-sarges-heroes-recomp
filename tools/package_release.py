@@ -43,7 +43,8 @@ def main():
     ap.add_argument('--build', type=Path, default=Path('build-release'))
     ap.add_argument('--sdl-prefix', type=Path, default=Path('/opt/sdl3'))
     ap.add_argument('--sdl-source', type=Path, default=Path('/opt/SDL'))
-    ap.add_argument('--version', default='0.1.7')
+    ap.add_argument('--version', default='0.1.8-pal-preview.1')
+    ap.add_argument('--pal', action='store_true', help='include the PAL English60 runtime')
     a = ap.parse_args()
     root = Path(__file__).resolve().parent.parent
     subprocess.run(['git', '-C', str(root), 'diff', '--exit-code', 'HEAD'], check=True)
@@ -57,6 +58,12 @@ def main():
     copy(build / 'game' / EXE, binary / EXE)
     copy(root / 'game/armymensh.toml', binary / 'armymensh.toml')
     copy(root / 'game/hud_overrides.ini', binary / 'hud_overrides.ini')
+    if a.pal:
+        copy(build / 'game/armymensh_pal_controls', binary / 'armymensh_pal_controls')
+        for name in ['armymensh_pal_probe.toml', 'hud_overrides_pal_en60.ini']:
+            copy(root / 'game' / name, binary / name)
+        subprocess.run(['patchelf', '--set-rpath', '$ORIGIN/lib', str(binary / 'armymensh_pal_controls')], check=True)
+
     copy(root / 'recomplauncher.json', binary / 'recomplauncher.json')
     shutil.copytree(build / 'game/frontend', binary / 'frontend')
     copy((a.sdl_prefix / 'lib/libSDL3.so.0').resolve(), binary / 'lib/libSDL3.so.0')
@@ -96,6 +103,7 @@ def main():
     # Reject surprises before making either uploadable archive.
     root_files = {EXE, 'armymensh.toml', 'hud_overrides.ini', 'recomplauncher.json',
                   'README.md', 'BUILDING.md', 'LICENSE', 'LICENSE-NOTICE.md', 'THIRD_PARTY_NOTICES.md'}
+    if a.pal: root_files |= {'armymensh_pal_controls', 'armymensh_pal_probe.toml', 'hud_overrides_pal_en60.ini'}
     fonts = {'Inter-Regular.ttf', 'Inter-SemiBold.ttf', 'Inter-Bold.ttf', 'promptfont.ttf',
              'Inter-LICENSE.txt', 'PromptFont-LICENSE.txt'}
     for p in binary.rglob('*'):
@@ -105,7 +113,7 @@ def main():
         allowed |= rel in {'frontend/launcher.rml', 'frontend/dreamcomp.rcss'}
         allowed |= rel.startswith('frontend/fonts/') and p.name in fonts
         if not allowed: raise RuntimeError('unexpected package file: ' + rel)
-        if rel not in {EXE, 'lib/libSDL3.so.0'} and p.suffix != '.ttf':
+        if rel not in ({EXE, 'lib/libSDL3.so.0'} | ({'armymensh_pal_controls'} if a.pal else set())) and p.suffix != '.ttf':
             if b'\0' in p.read_bytes(): raise RuntimeError('unexpected binary: ' + rel)
     for p in source.rglob('*'):
         if not p.is_file() or p.parent.name == 'frontend_fonts' and p.name in fonts: continue
@@ -116,7 +124,7 @@ def main():
     metadata = {'version': a.version, 'source_commit': commit,
                 'platform': 'Linux x86_64', 'build_base': 'Ubuntu 24.04',
                 'sdl': '3.4.18', 'rmlui': '6.3', 'freetype': '2.14.3',
-                'game_assets_included': False, 'compiled_static_translation_in_executable': True}
+                'pal_english_60hz_preview': a.pal, 'game_assets_included': False, 'compiled_static_translation_in_executable': True}
     for tree in [binary, source]:
         (tree / 'BUILD-INFO.json').write_text(json.dumps(metadata, indent=2) + '\n')
         lines = [hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + p.relative_to(tree).as_posix()

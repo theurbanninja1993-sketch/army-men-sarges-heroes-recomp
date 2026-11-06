@@ -681,24 +681,28 @@ bool Window::poll() {
         if (mapped_keyboard) keyboard_sideways = false;
     }
     const float dead = static_cast<float>(bindings_.deadzone_percent) / 100.0f;
-    const bool modern_controller = controller_camera_enabled && controller_camera_enabled();
-    const bool camera_active = modern_controller && !capturing_ && !game_input_blocked_ &&
-        (SDL_GetWindowFlags(window_) & SDL_WINDOW_INPUT_FOCUS) && !pads_.empty() && pads_[0];
-    if (controller_camera) {
-        auto axis = [&](SDL_GamepadAxis a) {
-            if (!camera_active) return 0.0f;
-            const float raw = std::clamp(static_cast<float>(SDL_GetGamepadAxis(pads_[0], a)) / 32767.0f, -1.0f, 1.0f);
-            const float amount = std::max(0.0f, (std::abs(raw) - dead) / std::max(0.001f, 1.0f - dead));
-            return std::copysign(amount * amount, raw);  // finer aiming near the centre
-        };
-        controller_camera(axis(SDL_GAMEPAD_AXIS_RIGHTX), axis(SDL_GAMEPAD_AXIS_RIGHTY), camera_active);
-    }
     for (unsigned p = 0; p < kMaxPlayers; ++p) {
     // Keyboard drives player 0; pad N drives player N (connection order).
     SDL_Gamepad* const player_pad = p < pads_.size() ? pads_[p] : nullptr;
+    const bool modern_controller = controller_camera_enabled_player
+        ? controller_camera_enabled_player(p)
+        : p == 0 && controller_camera_enabled && controller_camera_enabled();
+    const bool camera_active = modern_controller && !capturing_ && !game_input_blocked_ &&
+        (SDL_GetWindowFlags(window_) & SDL_WINDOW_INPUT_FOCUS) && player_pad;
+    if (controller_camera_player || (p == 0 && controller_camera)) {
+        auto axis = [&](SDL_GamepadAxis a) {
+            if (!camera_active) return 0.0f;
+            const float raw = std::clamp(static_cast<float>(SDL_GetGamepadAxis(player_pad, a)) / 32767.0f, -1.0f, 1.0f);
+            const float amount = std::max(0.0f, (std::abs(raw) - dead) / std::max(0.001f, 1.0f - dead));
+            return std::copysign(amount * amount, raw);
+        };
+        const float x = axis(SDL_GAMEPAD_AXIS_RIGHTX), y = axis(SDL_GAMEPAD_AXIS_RIGHTY);
+        if (controller_camera_player) controller_camera_player(p, x, y, camera_active);
+        else controller_camera(x, y, camera_active);
+    }
     GamepadSample physical, logical;
     bool mapped_gamepad = false;
-    if (p == 0 && camera_active && controller_map) {
+    if (camera_active && (controller_map_player || (p == 0 && controller_map))) {
         auto button = [&](PadControl c, SDL_GamepadButton b) {
             physical.controls[static_cast<unsigned>(c)] = SDL_GetGamepadButton(player_pad, b) ? 1.0f : 0.0f;
         };
@@ -722,7 +726,8 @@ bool Window::poll() {
         half_axis(PadControl::StickRight, SDL_GAMEPAD_AXIS_LEFTX, 1);
         half_axis(PadControl::StickUp, SDL_GAMEPAD_AXIS_LEFTY, -1);
         half_axis(PadControl::StickDown, SDL_GAMEPAD_AXIS_LEFTY, 1);
-        mapped_gamepad = controller_map(physical, logical);
+        mapped_gamepad = controller_map_player ? controller_map_player(p, physical, logical)
+                                              : controller_map(physical, logical);
     }
     for (unsigned i = 0; i < kPadControlCount; ++i) {
         // Digital and analogue sources are gathered separately, because only a digital one ramps.
@@ -745,7 +750,7 @@ bool Window::poll() {
                     if (SDL_GetGamepadButton(g, static_cast<SDL_GamepadButton>(gb.code)))
                         digital_on = true;
                 } else if (gb.source == BindSource::Axis) {
-                    if (p == 0 && modern_controller &&
+                    if (modern_controller &&
                         (gb.code == SDL_GAMEPAD_AXIS_RIGHTX || gb.code == SDL_GAMEPAD_AXIS_RIGHTY))
                         continue;  // the native camera owns these axes in modern mode
                     const float raw = static_cast<float>(SDL_GetGamepadAxis(

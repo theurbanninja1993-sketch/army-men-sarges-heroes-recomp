@@ -337,7 +337,8 @@ public:
         exe_dir_ = exe_dir(args[0]);
         // HUD overrides: the port's beside its config, the player's beside the settings.
         if (!config_path_.empty())
-            hud_port_file_ = config_path_.parent_path() / "hud_overrides.ini";
+            hud_port_file_ = config_path_.parent_path() /
+                (g_port && g_port->hud_overrides_file ? g_port->hud_overrides_file : "hud_overrides.ini");
         if (!g_settings.file().empty())
             hud_user_file_ = g_settings.file().parent_path() / "hud_overrides.ini";
         load_hud_overrides();
@@ -371,6 +372,7 @@ public:
                 args.push_back(vmu);
             }
         }
+        if (g_port && g_port->prepare_launch) g_port->prepare_launch(args);
     }
 
     int parse_arg(int i, int argc, char** argv) override {

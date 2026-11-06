@@ -14,6 +14,8 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace dream {
 class System;
@@ -29,6 +31,10 @@ struct PortInfo {
     bool mouse_camera = false;   // expose native mouse mode and sensitivity in Controls
     const char* controller_help = nullptr;  // optional description of this port's modes
     bool controller_camera = false;  // expose Classic / Modern controller modes
+    // Additional revisions selectable in the launcher, routed before the runtime boots.
+    struct DiscVariant { const char* boot_sha1; const char* label; };
+    std::vector<DiscVariant> launcher_disc_variants;
+    void (*prepare_launch)(std::vector<std::string>& args) = nullptr;
     unsigned players = 4;         // player cards in the Controls tab (1..4, Maple ports A-D)
 
     // Widescreen. Called every vblank on the guest thread with the target aspect ratio (4/3 means
@@ -63,6 +69,8 @@ struct PortInfo {
         float backdrop_cover = 0.6f;
     };
     HudRule hud;
+    // Relative to the game config directory; executable revisions may use different textures.
+    const char* hud_overrides_file = "hud_overrides.ini";
 
     // Anything else the port wants each vblank (cheats, debug overlays...).
     void (*on_vblank)(dream::System& sys, Settings& settings) = nullptr;

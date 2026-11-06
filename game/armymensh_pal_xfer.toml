@@ -1,0 +1,13 @@
+# The original PAL loader places GINXFER.BIN here to replace the main executable.
+[game]
+id = "armymensh_pal_xfer"
+title = "Army Men PAL executable transfer"
+region = "E"
+product = "T9708D"
+[disc]
+sha1_1st_read = "87ed534bde9293e3ca0193e8f85adf2b4b0eb0ba"
+[binary]
+path = "extracted/pal/GINXFER.CODE.BIN"
+load_address = 0x8CFD2000
+link_address = 0x0CFD2000
+entry = 0x8CFD2000

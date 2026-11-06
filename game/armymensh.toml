@@ -55,7 +55,9 @@ dest = 0x8C000600
 [functions]
 extra = [0x8C13AD34, 0x8C13AD7E, 0x8C13AE10, 0x8C13AE1A, 0x8C13AE56, 0x8C13AECE, 0x8C13AF62, 0x8C13AF72,
          0x0C0FC766, 0x0C0FC770,  # 0x0C0FC766/0x0C0FC770: reached when START is pressed (shots run)
-         0x0C057964, 0x0C057BFA]  # round 4, campaign level: 1441 and 2 calls, bytes in the image
+         0x0C057964, 0x0C057BFA,
+         # Observed NTSC two-player setup and match renderer continuations.
+         0x0C067164, 0x0C06717A, 0x0C0671CA, 0x0C067278, 0x0C067296, 0x0C06730C, 0x0C067324, 0x0C06733C, 0x0C067608, 0x0C067642, 0x0C06766A, 0x0C0676B8, 0x0C0676E6, 0x0C067714, 0x0C067742, 0x0C067770, 0x0C06779E, 0x0C0677CC, 0x0C0677FA, 0x0C0678E6, 0x0C067CAA, 0x0C06801A, 0x0C06810A, 0x0C068184, 0x0C0681FE, 0x0C068230, 0x0C06D084]  # round 4, campaign level: 1441 and 2 calls, bytes in the image
 
 # Round 4, Playmode Campaign (level load): copies of image code run from RAM (report suggestions).
 [[relocations]]  # RAM 0x8c00ca60 reproduces image 0x0c1369b8 for 48 bytes

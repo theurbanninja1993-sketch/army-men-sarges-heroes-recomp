@@ -1,0 +1,49 @@
+# Translation input only. Boot the PAL disc through armymensh_pal_probe.toml;
+# its original loader selects and initializes this secondary executable.
+[game]
+id = "armymensh_pal_en60"
+title = "Army Men: Sarge's Heroes (PAL English 60 Hz experimental)"
+region = "E"
+product = "T9708D"
+
+[disc]
+sha1_1st_read = "7e81e3336ab4d5dd6c7094f00e388ef4d9d12192"
+gdrom = true
+
+[binary]
+path = "extracted/pal/KLINKENGLISH60HZ.BIN"
+load_address = 0x8C010000
+link_address = 0x0C010000
+entry = 0x8C010000
+
+# Observed English60 callbacks. The camera routine begins with FPU register saves,
+# which the generic prologue scan missed. Seeding it also discovers its inner blocks.
+[functions]
+extra = [0x0C05BE4C, 0x0C0FD036, 0x0C0FD040, 0x0C0FD11E, 0x0C0FD13A,
+         0x0C13B854, 0x0C13B89E, 0x0C13B930, 0x0C13B93A, 0x0C13B976,
+         0x0C13B9EE, 0x0C13BA82, 0x0C13BA92,
+         # Observed PAL multiplayer/player-preview renderer entries.
+         0x0C0397A4, 0x0C0397B4, 0x0C0397BA, 0x0C0397C2, 0x0C0398B8, 0x0C0398D6, 0x0C0398E2, 0x0C039C48, 0x0C039C70, 0x0C039C7A, 0x0C039CAA, 0x0C03A246, 0x0C03A2EA, 0x0C03A65A, 0x0C03A74A, 0x0C03A7C4, 0x0C03A83E,
+         # Observed while entering and pausing a two-player match.
+         0x0C06A8B8]
+
+[hooks]
+"0x0C05B790" = "camera_update@entry"
+"0x0C01D0B4" = "projection_submit"
+# Status poll inside the native developer-logo movie loop.
+"0x0C12B00E" = "logo_status@entry"
+
+# Matched byte-for-byte against the first-mission RAM dump. The secondary game
+# changes VBR and installs its own copies rather than the loader's low entries.
+[[relocations]]
+source = 0x0C0FB34C
+size = 0x34
+dest = 0x8C00F400
+overlay = true
+no_fold = true
+[[relocations]]
+source = 0x0C0FB2F0
+size = 0x4C
+dest = 0x8C00FA00
+overlay = true
+no_fold = true

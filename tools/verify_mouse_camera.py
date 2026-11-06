@@ -13,6 +13,8 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 PRESS = ("start@2200,start@2300,start@2400,start@2500,start@2600,b@2800,"
          "down@3100,a@3300,a@3500,start@3700,a@3900,a@7800")
+PAL_PRESS = ("down@550,a@600,a@750,a@900,start@2900,"
+             "down@3100,a@3300,a@3500,start@3700,a@3900,a@7800")
 CASES = {
     "base": (None, False, []),
     "turn": ("8400:250:125", False, []),
@@ -44,9 +46,15 @@ def main():
     parser.add_argument("--exe", type=Path, default=ROOT / "build/game/army-men-sarges-heroes-recomp")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--jobs", type=int, default=4)
+    parser.add_argument("--profile", choices=("usa", "pal-en60"), default="usa")
+    parser.add_argument("--cases", nargs="+", choices=tuple(CASES), default=list(CASES))
     args = parser.parse_args()
     out = (args.out or Path(tempfile.mkdtemp(prefix="army-mouse-check-"))).resolve()
     out.mkdir(parents=True, exist_ok=True)
+    selected = set(args.cases) | {"base"}
+    if any(name.startswith("aim") for name in selected):
+        selected.add("aimbase")
+    pal = args.profile == "pal-en60"
 
     def run(name):
         sample, aim, extra = CASES[name]
@@ -61,34 +69,44 @@ def main():
             env["DREAM_EXP_PAD"] = "8200:8500:255:128:128"
         if name in STRAFE_PAD:
             env["DREAM_EXP_PAD"] = STRAFE_PAD[name]
-        command = [str(args.exe.resolve()), "--config", "game/armymensh.toml", "--disc",
+        command = [str(args.exe.resolve()), "--config",
+                   "game/armymensh_pal_probe.toml" if pal else "game/armymensh.toml", "--disc",
                    str(args.disc.resolve()), "--max-frames", "8450", "--rtc-seed", "1000000",
                    "--no-audio", "--settings", str(out / f"{name}-settings.ini"),
                    "--vmu", str(out / f"{name}-vmu.bin"),
-                   "--press", PRESS] + extra
+                   "--press", PAL_PRESS if pal else PRESS] + extra
         with (out / f"{name}.log").open("w") as log:
             subprocess.run(command, cwd=ROOT, env=env, stdout=log,
-                           stderr=subprocess.STDOUT, check=True, timeout=300)
+                           stderr=subprocess.STDOUT, check=True, timeout=900 if pal else 300)
         log = (out / f"{name}.log").read_text()
         assert "untranslated call targets: 0\n" in log, name
         assert "unmapped memory accesses: 1\n" in log and "0x8bfff1c0 w4 x1" in log, name
         ram = (out / f"{name}.ram").read_bytes()
         assert len(ram) == 16 * 1024 * 1024, name
-        f32 = lambda address: struct.unpack_from("<f", ram, address)[0]
-        result = {"pitch": f32(0x1A101C), "yaw": f32(0x1A1020),
-                  "player_yaw": f32(0x411820),
-                  "player_xz": [f32(0x411810), f32(0x411818)]}
+        u32 = lambda address: struct.unpack_from("<I", ram, address & 0xffffff)[0]
+        f32 = lambda address: struct.unpack_from("<f", ram, address & 0xffffff)[0]
+        phase = 0x1a6174 if pal else 0x18ed1c
+        assert u32(phase) == 3, (name, "not in gameplay")
+        camera = u32(phase + 16)
+        angles = u32(camera + 0xa4)
+        assert 0x8c000000 <= camera < 0x8d000000 and 0x8c000000 <= angles < 0x8d000000, name
+        result = {"pitch": f32(camera + 12), "yaw": f32(camera + 16),
+                  "player_yaw": f32(angles + 4),
+                  "player_xz": [f32(angles - 12), f32(angles - 4)]}
         return name, result
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
-        results = dict(pool.map(run, CASES))
+        results = dict(pool.map(run, [name for name in CASES if name in selected]))
     baseline = (out / "base.ram").read_bytes()
     for name in ("disabled", "menu"):
-        assert (out / f"{name}.ram").read_bytes() == baseline, name
+        if name in results:
+            assert (out / f"{name}.ram").read_bytes() == baseline, name
     expected = {"turn": (30, 25), "aimturn": (30, 15),
                 "aiminvert": (60, -30), "aimclamp": (120, 75),
                 "horizontal": (30, 10), "aimhorizontal": (30, 0), "separate_normal": (30, 25), "aimseparate": (15, 7.5)}
     for name, (yaw_step, pitch) in expected.items():
+        if name not in results:
+            continue
         result = results[name]
         reference = results["aimbase" if name.startswith("aim") else "base"]
         assert abs(math.remainder(result["yaw"] - reference["yaw"] - yaw_step, 360)) < 0.01, name
@@ -96,15 +114,18 @@ def main():
         assert abs(math.remainder(result["yaw"] - result["player_yaw"], 360)) < 0.01, name
         assert result["player_xz"] == reference["player_xz"], name
     for name in STRAFE_PAD:
+        if name not in results:
+            continue
         result = results[name]
         assert abs(math.remainder(result["player_yaw"] - results["base"]["player_yaw"], 360)) < 0.01, name
         assert result["player_xz"] != results["base"]["player_xz"], name
     origin = results["base"]["player_xz"]
-    left = [v - o for v, o in zip(results["strafeleft"]["player_xz"], origin)]
-    right = [v - o for v, o in zip(results["straferight"]["player_xz"], origin)]
-    assert sum(a * b for a, b in zip(left, right)) < 0, "strafe directions must oppose"
+    if "strafeleft" in results and "straferight" in results:
+        left = [v - o for v, o in zip(results["strafeleft"]["player_xz"], origin)]
+        right = [v - o for v, o in zip(results["straferight"]["player_xz"], origin)]
+        assert sum(a * b for a, b in zip(left, right)) < 0, "strafe directions must oppose"
     (out / "results.json").write_text(json.dumps(results, indent=2) + "\n")
-    print(f"PASS: {len(CASES)} first-mission scenarios; results and logs in {out}")
+    print(f"PASS: {len(results)} {args.profile} first-mission scenarios; results and logs in {out}")
 
 
 if __name__ == "__main__":

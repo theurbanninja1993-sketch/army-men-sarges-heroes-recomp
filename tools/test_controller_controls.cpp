@@ -129,6 +129,45 @@ int main(int argc, char** argv) {
         SDL_setenv_unsafe("ARMY_INPUT_KEYS","w",1);poll();
         check(v(PadControl::StickUp)==1 && v(PadControl::Y)==0,"SDL W movement restored after aim");
     }
+    window.set_game_input_blocked(false);
+    SDL_JoystickID extra_ids[3]{};
+    SDL_Joystick* extra[3]{};
+    for (unsigned i=0;i<3;++i) {
+        extra_ids[i]=SDL_AttachVirtualJoystick(&desc);
+        extra[i]=SDL_OpenJoystick(extra_ids[i]);
+        check(extra[i]!=nullptr,"open extra virtual controller");
+    }
+    for(int n=0;n<4;++n){poll();SDL_Delay(5);}
+    bool modes[4]={true,false,true,true};
+    float camera_x[4]{};bool camera_active[4]{};
+    window.controller_camera_enabled_player=[&](unsigned p){return modes[p];};
+    window.controller_map_player=[&](unsigned p,const GamepadSample& raw,GamepadSample& mapped){
+        check(modes[p],"only modern players receive mapping");
+        mapped=army_modern_controls(raw);return true;
+    };
+    window.controller_camera_player=[&](unsigned p,float x,float,bool active){
+        camera_x[p]=x;camera_active[p]=active;
+    };
+    reset();
+    for(unsigned p=0;p<4;++p) {
+        auto* pad=p==0?joystick:extra[p-1];
+        for(int a=0;a<6;++a) SDL_SetJoystickVirtualAxis(pad,a,a>=4?-32768:0);
+        SDL_SetJoystickVirtualAxis(pad,SDL_GAMEPAD_AXIS_RIGHT_TRIGGER,32767);
+        SDL_SetJoystickVirtualAxis(pad,SDL_GAMEPAD_AXIS_RIGHTX,32767-int(p)*3000);
+    }
+    for(int n=0;n<20;++n){poll();SDL_Delay(5);}
+    for(unsigned p=0;p<4;++p) {
+        check(window.pad_value(p,modes[p]?PadControl::X:PadControl::RightTrigger)==1,"each player receives its own action mapping");
+        check(camera_active[p]==modes[p],"camera activation follows each player mode");
+        check(modes[p]?camera_x[p]>0:camera_x[p]==0,"each player samples its own right stick");
+    }
+    check(camera_x[0]>camera_x[2] && camera_x[2]>camera_x[3],"right-stick samples stay independent");
+    window.set_game_input_blocked(true);poll();
+    for(unsigned p=0;p<4;++p)check(!camera_active[p] && camera_x[p]==0 && window.pad_value(p,PadControl::X)==0,"overlay releases all four players");
+    window.set_game_input_blocked(false);
+    SDL_CloseJoystick(extra[2]);SDL_DetachVirtualJoystick(extra_ids[2]);poll();
+    check(!camera_active[3] && camera_x[3]==0,"disconnect releases player four camera");
+    for(unsigned i=0;i<2;++i){SDL_CloseJoystick(extra[i]);SDL_DetachVirtualJoystick(extra_ids[i]);}
     SDL_CloseJoystick(joystick);SDL_DetachVirtualJoystick(id);
     std::puts("PASS: contextual mappings and real SDL controller input");
 }

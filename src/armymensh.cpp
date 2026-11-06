@@ -3,6 +3,8 @@
 #include "dreamcomp/port.h"
 #include "widescreen.h"
 
+void army_prepare_variant(std::vector<std::string>&);
+
 void army_mouse_settings_changed(dreamcomp::Settings& settings);
 
 namespace {
@@ -11,6 +13,9 @@ const dreamcomp::PortInfo kInfo = [] {
     dreamcomp::PortInfo p;
     p.id = "armymensh";
     p.title = "Army Men: Sarge's Heroes";
+    p.launcher_disc_variants = {{"7e1288a58f26eedf76cc7bdbaeb53a72a9332fbc",
+        "T9708D - PAL preview - English / 60 Hz only"}};
+    p.prepare_launch = army_prepare_variant;
     p.mouse_camera = true;
     p.controller_camera = true;
     p.controller_help = "Classic keeps the original controller mappings. Modern: right trigger fires, "

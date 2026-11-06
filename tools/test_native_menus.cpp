@@ -3,12 +3,14 @@
 #include "dream/runtime/host_ext.h"
 #include "dream/runtime/system.h"
 #include "dream/render/input.h"
+#include "../src/game_layout.h"
 #include <SDL3/SDL.h>
 #include <cassert>
 #include <cstdio>
 #include <fstream>
 #include <string>
 using dream::render::PadControl;
+namespace layout = army::layout;
 static void load(dream::System& sys, const std::string& path) {
     std::ifstream f(path,std::ios::binary);f.read(reinterpret_cast<char*>(sys.memory.ram()),16*1024*1024);
     assert(f.gcount()==16*1024*1024);
@@ -31,7 +33,7 @@ int main(int argc,char**argv) {
     auto value=[&](PadControl c){dream::render::KeyboardSample k;dream::render::GamepadSample p;
         assert(menu->map_keyboard(k,p));return p.controls[unsigned(c)];};
     load(sys,argv[1]);menu->on_start(sys);menu->on_vblank(sys);assert(released);
-    click(200,98);assert(sys.memory.read32(0x8c1a4de0)==2);assert(value(PadControl::A)==1);
+    click(200,98);assert(sys.memory.read32(layout::main_row)==2);assert(value(PadControl::A)==1);
     // Black side bars must not select/activate an option in widescreen.
     for(int i=0;i<5;++i)value(PadControl::A);
     SDL_Event e{};e.type=SDL_EVENT_MOUSE_BUTTON_DOWN;e.button.button=SDL_BUTTON_LEFT;e.button.x=0;e.button.y=294;
@@ -39,34 +41,36 @@ int main(int argc,char**argv) {
     load(sys,argv[2]);menu->on_vblank(sys);
     for(auto k:std::string("blzzrx"))assert(key(static_cast<SDL_Keycode>(k)));
     assert(key(SDLK_BACKSPACE));assert(key(static_cast<SDL_Keycode>('D')));menu->on_vblank(sys);
-    std::string text;for(unsigned i=0;i<sys.memory.read32(0x8c1a5350);++i)text+=char(sys.memory.read8(0x8c1a5338+i));
+    std::string text;for(unsigned i=0;i<sys.memory.read32(layout::password_length);++i)text+=char(sys.memory.read8(layout::password_buffer+i));
     assert(text=="BLZZRD");
     // Gameplay bindings associated with typed keys must not reach native menus.
     dream::render::KeyboardSample raw;raw.controls.fill(1);dream::render::GamepadSample logical;
     assert(menu->map_keyboard(raw,logical));for(auto v:logical.controls)assert(v==0);
     assert(key(SDLK_RETURN));menu->on_vblank(sys);
-    assert(sys.memory.read32(0x8c1a5358)==2 && sys.memory.read32(0x8c1a5360)==1);
+    assert(sys.memory.read32(layout::password_row)==2 && sys.memory.read32(layout::password_column)==1);
     assert(value(PadControl::A)==1);
-    assert(key(SDLK_DELETE));menu->on_vblank(sys);assert(sys.memory.read32(0x8c1a5350)==0);
+    assert(key(SDLK_DELETE));menu->on_vblank(sys);assert(sys.memory.read32(layout::password_length)==0);
     for(auto k:std::string(20,'b'))key(static_cast<SDL_Keycode>(k));menu->on_vblank(sys);
-    assert(sys.memory.read32(0x8c1a5350)==12 && sys.memory.read8(0x8c1a5338+12)==0);
+    assert(sys.memory.read32(layout::password_length)==12 && sys.memory.read8(layout::password_buffer+12)==0);
     load(sys,argv[3]);menu->on_vblank(sys);assert(released);
-    click(160,115);const auto player=sys.memory.read32(0x8c18cc70);
-    const auto panel=sys.memory.read32(0x8c0cfda0+4*player);assert(sys.memory.read32(panel+8)==1);
+    click(160,115);const auto player=sys.memory.read32(layout::active_player);
+    const auto panel=sys.memory.read32(layout::panel_table+4*player);assert(sys.memory.read32(panel+8)==1);
     click(160,95,SDL_BUTTON_RIGHT);
     // A transition to gameplay discards all queued menu actions and capture requests.
     sys.memory.write32(panel,0);menu->on_vblank(sys);assert(!released);
     assert(!menu->map_keyboard(raw,logical));
     load(sys,argv[4]);menu->on_vblank(sys);assert(released);
-    click(78,97);assert(value(PadControl::A)==1);
+    const float prompt_y = layout::extra_save_prompt && sys.memory.read32(layout::save_dialog)==layout::extra_save_prompt
+        ? 157.0f : 97.0f;
+    click(78,prompt_y);assert(value(PadControl::A)==1);
     for(int i=0;i<5;++i)value(PadControl::A);
-    click(200,97);assert(value(PadControl::B)==1);
+    click(200,prompt_y);assert(value(PadControl::B)==1);
     // Initial startup uses phase 0; returning frontend paths also use phase 7.
-    sys.memory.write32(0x8c18ed1c,0);sys.memory.write32(0x8c0eb1d0,5);
-    sys.memory.write32(0x8c1a53c0,0);menu->on_vblank(sys);assert(released);
-    click(200,98);assert(sys.memory.read32(0x8c1a4de0)==2);assert(value(PadControl::A)==1);
+    sys.memory.write32(layout::mission_phase,0);sys.memory.write32(layout::frontend_screen,5);
+    sys.memory.write32(layout::frontend_submenu,0);menu->on_vblank(sys);assert(released);
+    click(200,98);assert(sys.memory.read32(layout::main_row)==2);assert(value(PadControl::A)==1);
     // The title's Start prompt also accepts a mouse click.
-    sys.memory.write32(0x8c0eb1d0,4);menu->on_vblank(sys);
+    sys.memory.write32(layout::frontend_screen,4);menu->on_vblank(sys);
     click(160,180);assert(value(PadControl::Start)==1);
     std::puts("PASS: native SDL pointer mapping, password typing/editing, bounds and gameplay isolation");
 }

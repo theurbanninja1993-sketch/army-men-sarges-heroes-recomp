@@ -62,3 +62,28 @@ cd "/mnt/1TBSSD/Projects/Sarge's Heroes Recomp/work" && python3 src/dreamcomp/to
 ```
 
 The executable was unchanged by this path update.
+
+## PAL English60 (2026-11-05)
+
+The experimental PAL controls target now includes the same source, using `game_layout.h` for
+executable-specific addresses. English60 status entry0x0c12b00e, callerPR0x0c073724, movie
+state0x8c0f0ab0, filenames0x8c0f0af0/0x8c0f0aff, logical new buttons0x8c1fe738. Only the
+English60 main executable is hooked; the language/video bootstrap retains its native behavior.
+Stock PAL hooks supply a no-op for the shared guest translation.
+
+Headless integration tests pass, all zero untranslated:
+
+- Bootstrap `down@550,a@600,a@750,a@900`, then Start1300/A1600 skips both logos. By frame2000
+  decoder handle is0 and persistent flags0.
+- Continuous Start1300..1500 skips Midway only. Saffire has a live decoder at frame1500;
+  persistent flags remain0.
+- No skip presses: full16MiB RAM at frame2000 is byte-identical to the pre-hook binary, using
+  RTCseed1000000 and matching fresh scratch VMUs.
+- The earlier test bootstrap also pressed A1050, which is already during Midway playback and
+  legitimately skips it. That sequence is not the no-input fixture. Corrected evidence is
+  `/tmp/army-disc-versions/pal/logo-v2-{old,none,both,held}.{ram,log,txt}`.
+
+Window/audio verification passes2200frames: both logos skipped, native startup proceeds to the
+title screen (frame2100 visually inspected), zero untranslated and zero failed texture decodes.
+This test is unthrottled, so excess audio samples are intentionally dropped; it is not an audio
+quality benchmark. Evidence `logo-window.{log,txt}`, `logo-window-2100.{ta,vram,png}`.

@@ -78,6 +78,16 @@ release fault). Signatures cover the function's own extent, never its literal po
 `<id>_reloc_<dest>_2`, `_3`, ... with function names suffixed to keep them distinct; the game's
 CMakeLists derives the same unit names from the TOML.
 
+For separately loaded executables sharing the main load address, `dream-translate game
+--overlay-full --no-fold` also signs the primary unit and gives its functions unique names.
+Unlike the normal 32-word overlay prefix, `--overlay-full` signs the complete function extent:
+two builds can share a long prologue and differ later. A modified byte anywhere in that extent
+causes dispatch to fall back. This is a conservative development mode and may be slower, especially
+where a function's discovered extent includes mutable data. Overlay calls use runtime dispatch
+instead of direct native calls so they cannot bypass signature checks. With `--no-fold`, indirect
+JSR/BSRF calls also retain their live register target rather than using a target inferred from the
+on-disc literal pool. `--overlay` retains the shorter signatures for existing relocation cases.
+
 ## Symbols file (`symbols.tsv`)
 
 Tab-separated `address<TAB>name<TAB>source`, `#` comments, hand-editable. Produce it from a Ghidra

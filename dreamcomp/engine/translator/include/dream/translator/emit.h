@@ -55,6 +55,7 @@ struct EmitOptions {
     bool replay_hooks = false;
     bool irq_checks = true;  // interrupt polls at entry and back-edges (ADR 7)
     bool overlay = false;    // table entries carry the code words they were translated from
+    bool overlay_full_signature = false; // whole function extent, for overlapping executables
     // A function whose entry FPSCR mode the analysis could not pin down gets a second body compiled
     // for the default mode, chosen by its wrapper when the guest arrives in that mode (dreamcomp;
     // docs/emitter-design.md "Entry-mode clones"). Off: every such function keeps its runtime tests.

@@ -1,12 +1,15 @@
 #include "dreamcomp/hook.h"
 #include "dreamcomp/port.h"
 #include "dreamcomp/settings.h"
+#include "dreamcomp/controller_mode.h"
 #include "dream/runtime/host_ext.h"
 #include "dream/runtime/system.h"
 #include "widescreen.h"
 #include "controller_controls.h"
+#include "game_layout.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -15,12 +18,26 @@
 namespace {
 float pending_x = 0, pending_y = 0;
 float sensitivity = 0.12f, aim_sensitivity = 0.12f;
-bool modern_controller = false;
+struct ControllerInput {
+    bool modern = false;
+    float stick_x = 0, stick_y = 0, pending_x = 0, pending_y = 0;
+    std::uint64_t consumed_frame = 0;
+};
+std::array<ControllerInput, 4> controllers;
+void clear_stick(ControllerInput& input) {
+    input.stick_x = input.stick_y = input.pending_x = input.pending_y = 0;
+}
+int camera_player(dream::Memory& memory, std::uint32_t camera) {
+    const auto first = memory.read32(army::layout::mission_phase + 16) & 0x1fffffffu;
+    const auto address = camera & 0x1fffffffu;
+    if (first < 0x0c000000u || first > 0x0cfff000u || address < first) return -1;
+    const auto offset = address - first;
+    if (offset % army::layout::player_camera_stride != 0) return -1;
+    const auto player = offset / army::layout::player_camera_stride;
+    return player < controllers.size() ? static_cast<int>(player) : -1;
+}
 bool gameplay_camera = false, gameplay_input = false, native_menu_blocked = false;
 std::uint64_t gameplay_camera_frame = 0;
-float stick_x = 0, stick_y = 0;
-float pending_stick_x = 0, pending_stick_y = 0;
-std::uint64_t stick_consumed_frame = 0;
 bool enabled = true, invert_y = false;
 bool vertical = true, reset_pitch = false;
 std::uint64_t frame = 0;
@@ -35,11 +52,12 @@ float signed_angle(float degrees) {
 }
 
 void refresh_settings(dreamcomp::Settings& settings) {
-    const bool modern = settings.get("controller_mode", "classic") == "modern";
-    if (modern != modern_controller) {
-        stick_x = stick_y = pending_stick_x = pending_stick_y = 0;
+    for (unsigned player = 0; player < controllers.size(); ++player) {
+        auto& input = controllers[player];
+        const bool modern = dreamcomp::controller_is_modern(settings, player);
+        if (modern != input.modern) clear_stick(input);
+        input.modern = modern;
     }
-    modern_controller = modern;
     enabled = settings.get_bool("mouse_look", true);
     invert_y = settings.get_bool("mouse_invert_y", false);
     const bool next_vertical = settings.get_bool("mouse_vertical", true);
@@ -60,7 +78,10 @@ struct MouseCamera final : dream::host::Extension {
     const char* name() const override { return "Army Men mouse camera"; }
     bool wants_mouse_motion() override { return true; }
     bool wants_keyboard_strafe() override { return true; }
-    bool controller_camera_enabled() override { return modern_controller && !native_menu_blocked; }
+    bool controller_camera_enabled() override { return controller_camera_enabled_player(0); }
+    bool controller_camera_enabled_player(unsigned player) override {
+        return player < controllers.size() && controllers[player].modern && !native_menu_blocked;
+    }
     bool map_keyboard(const dream::render::KeyboardSample& physical,
                       dream::render::GamepadSample& logical) override {
         if (!physical.aiming || native_menu_blocked || !gameplay_input)
@@ -70,16 +91,24 @@ struct MouseCamera final : dream::host::Extension {
     }
     bool map_controller(const dream::render::GamepadSample& physical,
                         dream::render::GamepadSample& logical) override {
-        // Leave game menus/cinematics on their stock bindings, even in Modern.
-        if (!modern_controller || native_menu_blocked || !gameplay_input)
-            return false;
+        return map_controller_player(0, physical, logical);
+    }
+    bool map_controller_player(unsigned player, const dream::render::GamepadSample& physical,
+                               dream::render::GamepadSample& logical) override {
+        if (!controller_camera_enabled_player(player) || !gameplay_input) return false;
         logical = army_modern_controls(physical);
         return true;
     }
     void on_controller_camera(float x, float y, bool active) override {
-        stick_x = active && modern_controller && std::isfinite(x) ? std::clamp(x, -1.0f, 1.0f) : 0;
-        stick_y = active && modern_controller && std::isfinite(y) ? std::clamp(y, -1.0f, 1.0f) : 0;
-        if (!active) pending_stick_x = pending_stick_y = 0;
+        on_controller_camera_player(0, x, y, active);
+    }
+    void on_controller_camera_player(unsigned player, float x, float y, bool active) override {
+        if (player >= controllers.size()) return;
+        auto& input = controllers[player];
+        active = active && input.modern;
+        input.stick_x = active && std::isfinite(x) ? std::clamp(x, -1.0f, 1.0f) : 0;
+        input.stick_y = active && std::isfinite(y) ? std::clamp(y, -1.0f, 1.0f) : 0;
+        if (!active) input.pending_x = input.pending_y = 0;
     }
     void on_mouse_motion(float dx, float dy, bool active) override {
         if (!active) {
@@ -98,34 +127,39 @@ struct MouseCamera final : dream::host::Extension {
     }
     void on_start(dream::System&) override {
         gameplay_input = false;
+        controllers = {};
         refresh_settings(dreamcomp::settings());
-        pending_x = pending_y = stick_x = stick_y = pending_stick_x = pending_stick_y = 0;
+        pending_x = pending_y = 0;
     }
     void on_vblank(dream::System& sys) override {
         frame = sys.spg.frames();
         // Input profiles follow mission/menu state, independently of camera cadence.
         // Reverting to stock trigger ramping on a skipped camera tick drops held aim.
-        gameplay_input = sys.memory.read32(0x8c18ed1cu) == 3;
+        gameplay_input = sys.memory.read32(army::layout::mission_phase) == 3;
         // fn_0c0364ba inhibits gameplay input while native menus are active,
         // including a short release debounce. The camera still updates while paused.
-        native_menu_blocked = sys.memory.read8(0x8c18e770u) != 0;
-        if (native_menu_blocked) {
-            stick_x = stick_y = pending_stick_x = pending_stick_y = 0;
-        }
-        // Test the native camera without a physical pad; outside the interval the
-        // stick is released, just as a live inactive sample releases it.
-        if (const char* test = std::getenv("ARMY_TEST_STICK")) {
-            unsigned long long from = 0, to = 0;
-            float x = 0, y = 0;
-            if (std::sscanf(test, "%llu:%llu:%f:%f", &from, &to, &x, &y) == 4)
-                on_controller_camera(x, y, frame >= from && frame < to);
-        }
-        // Integrate at the guest's 59.94 Hz, independently of host refresh and
-        // internal resolution. Keep both samples for a 30 Hz camera update.
-        if (frame - stick_consumed_frame > 2) pending_stick_x = pending_stick_y = 0;
-        if (modern_controller) {
-            pending_stick_x += stick_x * (180.0f / 59.94f);
-            pending_stick_y += stick_y * (90.0f / 59.94f);
+        native_menu_blocked = sys.memory.read8(army::layout::menu_inhibit) != 0;
+        for (unsigned player = 0; player < controllers.size(); ++player) {
+            auto& input = controllers[player];
+            // Legacy diagnostic remains player one; numbered variants exercise other players.
+            const auto key = "ARMY_TEST_STICK_P" + std::to_string(player + 1);
+            const char* test = std::getenv(key.c_str());
+            if (!test && player == 0) test = std::getenv("ARMY_TEST_STICK");
+            if (test) {
+                unsigned long long from = 0, to = 0;
+                float x = 0, y = 0;
+                if (std::sscanf(test, "%llu:%llu:%f:%f", &from, &to, &x, &y) == 4)
+                    on_controller_camera_player(player, x, y, frame >= from && frame < to);
+            }
+            if (native_menu_blocked || !gameplay_input) {
+                clear_stick(input);
+                continue;
+            }
+            if (frame - input.consumed_frame > 2) input.pending_x = input.pending_y = 0;
+            if (input.modern) {
+                input.pending_x += input.stick_x * (180.0f / 59.94f);
+                input.pending_y += input.stick_y * (90.0f / 59.94f);
+            }
         }
         // Gameplay updates at 30 Hz while input is sampled at 60 Hz. Keep both samples
         // until the next camera update, but do not carry motion across a cinematic.
@@ -153,33 +187,40 @@ void army_mouse_settings_changed(dreamcomp::Settings& settings) {
 
 DC_HOOK_ENTRY(camera_update) {
     army_camera_aspect(m, c.r[4]);
+    const auto camera = c.r[4];
+    const int player = camera_player(m, camera);
+    if (player < 0) return false;
+    auto& input = controllers[static_cast<unsigned>(player)];
     if (native_menu_blocked) {
-        pending_x = pending_y = pending_stick_x = pending_stick_y = 0;
+        if (player == 0) pending_x = pending_y = 0;
+        clear_stick(input);
         return false;
     }
-    const auto camera = c.r[4];
     const auto callback = m.read32(camera + 0xdc) & 0x1fffffffu;
     const auto mode = m.read32(camera + 0x64);
-    // Only the campaign follow camera and first-person targeting camera; cinematics use others.
-    gameplay_camera = (mode == 1 && callback == 0x0c057964) ||
-                      (mode == 4 && callback == 0x0c057da8);
-    if (!gameplay_camera) {
-        pending_stick_x = pending_stick_y = 0;
-        stick_consumed_frame = frame;
+    const bool valid_camera = (mode == 1 && callback == army::layout::follow_camera) ||
+                              (mode == 4 && callback == army::layout::aim_camera);
+    if (player == 0) {
+        gameplay_camera = valid_camera;
+        if (valid_camera) gameplay_camera_frame = frame;
+    }
+    if (!valid_camera) {
+        input.pending_x = input.pending_y = 0;
+        input.consumed_frame = frame;
         return false;
     }
-    gameplay_camera_frame = frame;
-    if ((!enabled || (pending_x == 0 && pending_y == 0 && !reset_pitch)) &&
-        pending_stick_x == 0 && pending_stick_y == 0) return false;
-    if (reset_pitch) {
+    const bool mouse_player = player == 0;
+    if ((!mouse_player || !enabled || (pending_x == 0 && pending_y == 0 && !reset_pitch)) &&
+        input.pending_x == 0 && input.pending_y == 0) return false;
+    if (mouse_player && reset_pitch) {
         dreamcomp::write_f32(m, camera + (mode == 4 ? 0xc : 0xa8), mode == 4 ? 0.0f : 10.0f);
         reset_pitch = false;
     }
-    const float dx = enabled ? std::exchange(pending_x, 0.0f) : 0;
-    const float dy = enabled ? std::exchange(pending_y, 0.0f) : 0;
-    const float stick_yaw = std::exchange(pending_stick_x, 0.0f);
-    const float stick_pitch = std::exchange(pending_stick_y, 0.0f);
-    stick_consumed_frame = frame;
+    const float dx = mouse_player && enabled ? std::exchange(pending_x, 0.0f) : 0;
+    const float dy = mouse_player && enabled ? std::exchange(pending_y, 0.0f) : 0;
+    const float stick_yaw = std::exchange(input.pending_x, 0.0f);
+    const float stick_pitch = std::exchange(input.pending_y, 0.0f);
+    input.consumed_frame = frame;
     const auto angles = m.read32(camera + 0xa4);
     const auto physical = angles & 0x1fffffffu;
     if (physical < 0x0c000000 || physical > 0x0cffff9e) return false;
@@ -209,8 +250,8 @@ DC_HOOK_ENTRY(camera_update) {
     }
     dreamcomp::write_f32(m, camera + 0x10, wrap(camera_yaw + yaw_delta));
     if (std::getenv("ARMY_TRACE_CAMERA"))
-        std::printf("mouse camera frame=%llu mode=%u dx=%g dy=%g yaw=%g pitch=%g\n",
-                    static_cast<unsigned long long>(frame), mode, dx, dy,
+        std::printf("mouse camera frame=%llu player=%u mode=%u dx=%g dy=%g yaw=%g pitch=%g\n",
+                    static_cast<unsigned long long>(frame), static_cast<unsigned>(player + 1), mode, dx, dy,
                     dreamcomp::read_f32(m, angles + 4), dreamcomp::read_f32(m, camera + 0xc));
     return false;
 }

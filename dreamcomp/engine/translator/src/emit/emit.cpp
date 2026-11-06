@@ -293,7 +293,7 @@ public:
                         // landing one instruction into a prologue, or shared code): control
                         // continues in that function, so tail-call it.
                         out << "    // falls through into the function at " << hex(stop) << "\n";
-                        out << "    " << call_target_expr(stop) << " return;\n";
+                        out << "    " << tail_target_expr(stop) << " return;\n";
                     } else {
                         // Control continues at `stop`, which no function of this unit starts at:
                         // hand it to the runtime (the miss handler interprets it in dev builds
@@ -890,9 +890,23 @@ private:
 
     std::string call_target_expr(std::uint32_t target) const {
         auto it = known_.find(normalise(target));
-        if (it != known_.end())
+        if (it != known_.end() && !opt_.overlay)
             return it->second + "(c, m);";
         return "call_indirect(c, m, " + hexu(target) + ");";
+    }
+
+    bool unwind_overlay_tail() const {
+        // A hook with an exit action must retain its caller frame until the tail
+        // callee finishes (e.g. restore a temporarily patched projection matrix).
+        return opt_.overlay && (spec_.hook.empty() || !spec_.hook_exit);
+    }
+
+    std::string tail_target_expr(std::uint32_t target) const {
+        // Overlay lookup adds a dispatch frame. Split loops must unwind through the
+        // guest runner rather than accumulating host frames on every cross-range edge.
+        if (unwind_overlay_tail())
+            return "tail_transfer(c, m, " + hexu(target) + ");";
+        return call_target_expr(target);
     }
 
     std::string irq_check_if_backedge(std::uint32_t target, std::uint32_t pc) const {
@@ -923,7 +937,7 @@ private:
                 out << "    if (" << cond << ") { c.cycles += 1; " << irq_check_if_backedge(t, pc)
                     << "goto " << label(t) << "; }\n";
             } else {
-                out << "    if (" << cond << ") { c.cycles += 1; " << call_target_expr(t)
+                out << "    if (" << cond << ") { c.cycles += 1; " << tail_target_expr(t)
                     << " return; }\n";
             }
             return pc + 2;
@@ -961,7 +975,7 @@ private:
                     out << "        if (taken) { " << irq_check_if_backedge(t, pc) << "goto "
                         << label(t) << "; }\n";
                 } else {
-                    out << "        if (taken) { " << call_target_expr(t) << " return; }\n";
+                    out << "        if (taken) { " << tail_target_expr(t) << " return; }\n";
                 }
                 break;
             }
@@ -972,7 +986,7 @@ private:
                     out << "        " << irq_check_if_backedge(t, pc) << "goto " << label(t)
                         << ";\n";
                 } else {
-                    out << "        " << call_target_expr(t) << " return;\n";
+                    out << "        " << tail_target_expr(t) << " return;\n";
                 }
                 break;
             }
@@ -989,7 +1003,8 @@ private:
                 // when it is a function of this unit; otherwise the register value goes through
                 // the function table at run time.
                 std::uint32_t k = 0;
-                const bool constant = constant_in_register(current_block_start(pc), pc, ins.m, k);
+                const bool constant = opt_.fold_literals && !opt_.overlay &&
+                    constant_in_register(current_block_start(pc), pc, ins.m, k);
                 const std::uint32_t direct = normalise(ins.op == Op::BSRF ? pc + 4 + k : k);
                 if (constant && known_.count(direct)) {
                     out << "        c.pr = " << hexu(pc + 4) << ";\n";
@@ -1029,14 +1044,16 @@ private:
                             << irq_check_if_backedge(t, pc) << "goto " << label(t) << ";\n";
                     }
                     out << "            default: c.pc = " << hexu(pc)
-                        << "; call_indirect(c, m, target); return;\n";
+                        << (unwind_overlay_tail() ? "; tail_transfer(c, m, target); return;\n"
+                                         : "; call_indirect(c, m, target); return;\n");
                     out << "        }\n";
                 } else {
                     if (ins.op == Op::BRAF)
                         note(pc, ins,
                              "computed jump with no recovered table: emitted as tail call");
                     out << "        c.pc = " << hexu(pc)
-                        << "; call_indirect(c, m, target); return;\n";
+                        << (unwind_overlay_tail() ? "; tail_transfer(c, m, target); return;\n"
+                                         : "; call_indirect(c, m, target); return;\n");
                 }
                 break;
             }
@@ -1873,13 +1890,13 @@ EmitResult emit_unit(const Image& image, const std::vector<FunctionSpec>& functi
     }
     src << "namespace {\n";
     if (options.overlay) {
-        // Up to 32 instruction words from the function's own extent (never its literal pool,
-        // which a no_fold copy patches at run time): the runtime dispatches to this translation
-        // only while RAM still holds them.
+        // Normally a short prefix; whole-executable overlays can request the full extent.
+        // Full extents can include mutable pools, conservatively forcing a miss when patched.
         const std::uint32_t image_end = image.base + static_cast<std::uint32_t>(image.bytes.size());
         for (const auto& f : specs) {
             src << "const std::uint16_t kSig_" << f.name << "[] = {";
-            const std::uint32_t stop = std::min({f.end, f.entry + 64u, image_end});
+            const std::uint32_t stop = options.overlay_full_signature
+                ? std::min(f.end, image_end) : std::min({f.end, f.entry + 64u, image_end});
             for (std::uint32_t a = f.entry; a < stop; a += 2) src << hexu(image.read16(a)) << ", ";
             src << "};\n";
         }

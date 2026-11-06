@@ -1,0 +1,52 @@
+# Experimental stock PAL language/video bootstrap. Not a supported release profile.
+# Used by the interpreter probe and native PAL bootstrap. No USA native hooks apply here.
+[game]
+id = "armymensh_pal_probe"
+title = "Army Men: Sarge's Heroes (PAL bootstrap investigation)"
+region = "E"
+product = "T9708D"
+
+[disc]
+sha1_1st_read = "7e1288a58f26eedf76cc7bdbaeb53a72a9332fbc"
+gdrom = true
+
+[binary]
+path = "extracted/pal/1ST_READ.BIN"
+load_address = 0x8C010000
+link_address = 0x0C010000
+entry = 0x8C010000
+
+# Observed loader-stage memory helpers in the first-mission trace.
+[functions]
+extra = [0x0C0AB94A, 0x0C0AB954]
+
+# Stock loader copies these interrupt entries below its load address.
+[[relocations]]
+source = 0x0C0A9C60
+size = 0x34
+dest = 0x8C000000
+overlay = true
+no_fold = true
+[[relocations]]
+source = 0x0C0A9BCC
+size = 0x34
+dest = 0x8C000100
+overlay = true
+no_fold = true
+[[relocations]]
+source = 0x0C0A9BCC
+size = 0x34
+dest = 0x8C000400
+overlay = true
+no_fold = true
+[[relocations]]
+source = 0x0C0A9C04
+size = 0x58
+dest = 0x8C000600
+overlay = true
+no_fold = true
+
+# Restrict the preview to its measured secondary executable, even if another
+# language or the original default 50 Hz is selected in the stock startup UI.
+[hooks]
+"0x0C010BBC" = "pal_boot_language@entry"

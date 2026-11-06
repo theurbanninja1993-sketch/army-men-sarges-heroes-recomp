@@ -132,3 +132,52 @@ their own callback/mode guards. Ten native controller-camera scenarios and pure
 input mapping checks pass. Reproduction/evidence: the RMB hold section of
 `mouse-camera.md`. `verify_controller_camera.py` now isolates settings and VMU
 files per scenario to prevent settings migration from coupling concurrent tests.
+
+
+## Per-player mode overrides (2026-11-06)
+
+The main `controller_mode` remains the default. Controller profiles expose
+`controller_mode_p1` through `controller_mode_p4`, each accepting `inherit`
+(default), `classic`, or `modern`. Missing or invalid overrides inherit the main
+setting. Apply persists the draft and updates the live game. Resetting a
+controller profile restores its mode override to inheritance; button bindings
+remain shared across controllers.
+
+The host maps actions and samples right-stick axes independently for all four
+SDL pad slots. Each native camera owns separate accumulated yaw/pitch input.
+The primary camera pointer at mission phase +16 starts a four-camera bank with
+stride 0x310 in both regions. Camera callbacks resolve the owner from this bank;
+mouse input belongs only to player one. Non-player and cinematic cameras cannot
+consume another player's stick input. Pause, host overlays, disconnect and mode
+changes clear pending input per player.
+
+Verification:
+
+- Both region game targets built.
+- `armymensh_player_controls_{usa,pal}_tests` pass: all four modes, inheritance,
+  mixed overrides, out-of-order camera callbacks, live settings, release,
+  native pause and saved settings.
+- `armymensh_controller_profiles_ui_tests` passes using the actual RmlUi menu,
+  including editing disconnected players, Apply notifications and persistence.
+  Rendered Player 2 profile reviewed at 1280x720.
+- Actual SDL four-virtual-controller test passes: mixed Classic/Modern mappings,
+  independent stick samples, overlay release and player-four disconnect.
+- Four deterministic PAL two-player gameplay runs: Classic override is RAM
+  identical to baseline, explicit Modern matches inherited Modern, and Player 2
+  camera changes without altering Player 1. Zero untranslated calls.
+- NTSC two-player gameplay camera values show the same isolated Player 2
+  yaw/pitch changes. This headless route also exposes untranslated
+  multiplayer renderer calls; it is not a clean multiplayer graphics validation.
+
+- NTSC first-mission mouse baseline/turn regression checks pass after camera-owner routing.
+
+Manual four-controller gameplay remains a useful acceptance check.
+
+
+### PAL preview release follow-up
+
+The NTSC multiplayer route's27 observed renderer/continuation entries were added
+to its translation profile during release preparation. Its development rerun now
+has zero untranslated calls. Both region first-mission mouse regression cases
+also pass with interpreter fallback disabled. See the PAL preview release notes
+for the final packaged multiplayer validation.

@@ -59,6 +59,17 @@ public:
     }
     virtual bool controller_camera_enabled() { return false; }
     virtual void on_controller_camera(float x, float y, bool active) { (void)x; (void)y; (void)active; }
+    // Per-player input. The defaults preserve the older player-one extension API.
+    virtual bool map_controller_player(unsigned player, const render::GamepadSample& physical,
+                                       render::GamepadSample& logical) {
+        return player == 0 && map_controller(physical, logical);
+    }
+    virtual bool controller_camera_enabled_player(unsigned player) {
+        return player == 0 && controller_camera_enabled();
+    }
+    virtual void on_controller_camera_player(unsigned player, float x, float y, bool active) {
+        if (player == 0) on_controller_camera(x, y, active);
+    }
     virtual bool wants_keyboard_strafe() { return false; }
     virtual void on_mouse_motion(float dx, float dy, bool active) { (void)dx; (void)dy; (void)active; }
     // Each decoded display list, before it is drawn (window builds only). Vertices are in the

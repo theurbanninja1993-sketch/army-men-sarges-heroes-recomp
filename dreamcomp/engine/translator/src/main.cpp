@@ -39,7 +39,7 @@ int usage(int code) {
                  "  dream-translate symbols --ghidra functions.json --out symbols.tsv "
                  "[--keep-conflicts]\n"
                  "  dream-translate game --config games/ID/ID.toml --out-dir DIR [--no-fold] "
-                 "[--trace] [--no-irq]\n",
+                 "[--trace] [--no-irq] [--overlay | --overlay-full]\n",
                  dream::translator::version().data());
     return code;
 }
@@ -413,7 +413,7 @@ int translate_view(const dream::translator::GameConfig& cfg, const dream::transl
     // [hooks] (dreamcomp): "name" hooks entry and exit, "name@entry" / "name@exit" one side. Only
     // the main image view carries hooks; an address that is not a function entry here is fatal,
     // because a hook that silently never fires is the worst outcome.
-    if (!opt.overlay && stem.find("_reloc_") == std::string::npos) {
+    if (stem.find("_reloc_") == std::string::npos) {
         for (const auto& [addr, spec] : cfg.hooks) {
             const std::uint32_t at = to_link_space(cfg, addr);
             std::string name = spec;
@@ -452,7 +452,8 @@ int translate_view(const dream::translator::GameConfig& cfg, const dream::transl
     if (opt.overlay) {
         // Several overlay units can translate the same address: keep their symbols distinct.
         const auto pos = stem.find("_reloc_");
-        const std::string suffix = "_" + (pos == std::string::npos ? stem : stem.substr(pos + 7));
+        const std::string suffix = "_" + (opt.overlay_full_signature || pos == std::string::npos
+                                         ? stem : stem.substr(pos + 7));
         for (auto& f : fns) f.name += suffix;
     }
     const auto res = dream::translator::emit_unit(img, fns, opt);
@@ -500,6 +501,12 @@ int cmd_game(int argc, char** argv) {
             out_dir = argv[++i];
         else if (!std::strcmp(argv[i], "--no-fold"))
             opt.fold_literals = false;
+        else if (!std::strcmp(argv[i], "--overlay"))
+            opt.overlay = true;
+        else if (!std::strcmp(argv[i], "--overlay-full")) {
+            opt.overlay = true;
+            opt.overlay_full_signature = true;
+        }
         else if (!std::strcmp(argv[i], "--replay-hooks"))
             opt.replay_hooks = true;
         else if (!std::strcmp(argv[i], "--trace"))

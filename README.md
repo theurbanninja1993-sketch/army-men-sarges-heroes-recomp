@@ -10,6 +10,23 @@ with [Dreamcomp](https://github.com/danielgomesvieira2000/dreamcomp).
 level 1 through level 2, mouse and keyboard, and Classic and Modern controller modes. Steam Deck
 has not yet been validated separately.
 
+## PAL preview (Linux)
+
+The **v0.1.8-pal-preview.1** prerelease adds the verified European **T9708D V1.001** disc.
+Use the same executable and Load Game screen; the launcher detects your disc automatically.
+The preview always loads **English at 60 Hz**. The original startup language/video choices
+are overridden: other languages and 50 Hz are not implemented and previously crashed.
+PAL support for Windows is coming soon; the existing Windows stable release supports USA discs.
+
+Player testing covers the complete first campaign level and a short Snow level test, including
+its helicopter audio. Multiplayer setup, scope rendering and per-player controls have also
+been checked. The rest of the campaign, other multiplayer maps and sustained four-player play
+remain unverified; please report the level/map and reproduction steps with any issues.
+
+PAL has a separate default memory card in `dreamcomp/armymensh_pal_en60`; launcher settings
+remain shared. Existing cards are not converted between regions. A custom `--vmu` path is
+respected.
+
 ## Play
 
 ### Linux
@@ -32,15 +49,17 @@ has not yet been validated separately.
 The Windows build is a console program, so a console window stays open with the log. Keep it while
 testing or reporting an issue.
 
-You must supply your own game. The port supports these verified **T-9715N V1.001** executables:
+You must supply your own game. The port supports these verified executables (USA **T-9715N V1.001**, plus the PAL preview below):
 
 | Image contents | Boot executable SHA-1 |
 |---|---|
 | USA GD-ROM layout (including GDI/CHD dumps) | `5f49f40a0a30fe240d8868025201326b266e369b` |
 | Previously supported CDI copy | `51384b12a9de6d9a44caecaadafd29dca86807cf` |
+| PAL T9708D V1.001 (Linux preview, English/60 Hz only) | `7e1288a58f26eedf76cc7bdbaeb53a72a9332fbc` |
 
 The executable hash, rather than the image extension or filename, determines compatibility.
-PAL and other revisions are not yet supported. Different or modified executables are rejected.
+PAL requires the Linux preview package. Other revisions and modified game executables are rejected.
+PAL verification also checks the English60 secondary executable and transfer payload.
 The image stays on your computer.
 No disc image, extracted assets, BIOS, saves, or generated game source are distributed here.
 The release executable includes the compiled static translation and still requires your disc.
@@ -88,7 +107,10 @@ remains its pause/menu button. Some settings require a restart, as marked in the
 | Prone | See Controls settings | B |
 
 Classic mode retains the original controller mappings. Bindings and sensitivities can be changed
-in the launcher or port settings.
+in the launcher or port settings. In **Controls → Player 1–4 → Edit Profile**, each controller
+can choose **Use main setting**, **Classic**, or **Modern**. Use main setting is the default
+and follows the mode at the top of Controls. Press **Apply** to save; changes take effect
+immediately. Controller button bindings remain shared.
 
 ### Troubleshooting
 

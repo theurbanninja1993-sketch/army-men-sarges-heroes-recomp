@@ -130,6 +130,10 @@ public:
     std::function<bool(const GamepadSample&, GamepadSample&)> controller_map;
     std::function<bool()> controller_camera_enabled;
     std::function<void(float x, float y, bool active)> controller_camera;
+    // Prefer these when set; legacy callbacks above remain player-one fallbacks.
+    std::function<bool(unsigned, const GamepadSample&, GamepadSample&)> controller_map_player;
+    std::function<bool(unsigned)> controller_camera_enabled_player;
+    std::function<void(unsigned, float, float, bool)> controller_camera_player;
     bool keyboard_strafe = false;  // sideways keyboard stick bindings imply full strafe trigger
     // Whether a pad's Back/Select button counts as Control::Menu (the binding screen). An overlay
     // that takes that button for itself turns this off; F1 still opens the binding screen.

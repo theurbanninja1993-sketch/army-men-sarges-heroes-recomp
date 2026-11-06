@@ -15,6 +15,7 @@
 #include "dream/render/vk/window.h"
 #include "dreamcomp/port.h"
 #include "dreamcomp/settings.h"
+#include "dreamcomp/controller_mode.h"
 
 namespace dreamcomp::frontend {
 
@@ -291,6 +292,9 @@ MenuUi::MenuUi(const UiConfig& cfg, Mode mode, UiHost host)
         game_ok_ = dream::translator::load_game_config(cfg.config, game_, err);
         if (!game_ok_)
             game_error_ = err;
+        if (game_ok_ && cfg.port)
+            for (const auto& variant : cfg.port->launcher_disc_variants)
+                game_.compatible_sha1_1st_read.emplace_back(variant.boot_sha1);
     } else {
         game_error_ = "the game's configuration file was not found next to the executable";
     }
@@ -608,7 +612,9 @@ float MenuUi::draft_aspect() const {
 }
 
 bool MenuUi::tab_has_settings(int tab) const {
-    return tab != 1 || (ctl_view_ == 0 && cfg_.port && (cfg_.port->mouse_camera || cfg_.port->controller_camera));
+    return tab != 1 || (cfg_.port &&
+        ((ctl_view_ == 0 && cfg_.port->mouse_camera) ||
+         (cfg_.port->controller_camera && (ctl_view_ == 0 || ctl_device_ == 1))));
 }
 
 // ---- pages ------------------------------------------------------------------------------------------
@@ -627,6 +633,9 @@ std::string MenuUi::page_launcher() const {
         if (!game_.region.empty())
             sub += (sub.empty() ? "" : kDot) + game_.region;
     }
+    if (cfg_.port && disc_playable(disc_))
+        for (const auto& variant : cfg_.port->launcher_disc_variants)
+            if (disc_.found_sha1 == variant.boot_sha1 && variant.label) sub = variant.label;
     s += "<div id=\"launcher\"><div id=\"l-title\">" + esc(title()) + "</div><div id=\"l-sub\">" +
          esc(sub) + "</div><div id=\"lmenu\">";
     const bool ready = playable();
@@ -731,7 +740,7 @@ std::string MenuUi::controls_cards() {
     std::string s = "<div id=\"ccards\">";
     for (unsigned p = 0; p < players; ++p) {
         const bool pad = p < pads_.size();
-        const bool usable = p == 0 || pad;
+        const bool usable = p == 0 || pad || (cfg_.port && cfg_.port->controller_camera);
         std::string icon = utf8(pad || p > 0 ? kDeviceGamepad : kDeviceKeyboard);
         std::string dev = pad ? pads_[p] : (p == 0 ? std::string("Keyboard") : "No controller");
         std::string dev2 = p == 0 && pad ? "+ Keyboard" : (p == 0 ? "Connect a controller at any time" : "");
@@ -746,7 +755,7 @@ std::string MenuUi::controls_cards() {
              "\">Edit Profile</div></div>";
     }
     s += "</div><div class=\"cnote\">Controllers play in the order they are connected; the "
-         "keyboard plays as player 1. Every controller uses the controller profile.</div>";
+         "keyboard plays as player 1. Controller bindings are shared; each player can override the control mode.</div>";
     return s;
 }
 
@@ -760,10 +769,17 @@ std::string MenuUi::controls_mappings() {
              "class=\"chint\">" + (kb ? "Esc cancels" : "Select or Esc cancels") + "</div>";
     else
         s += std::string("<div class=\"ctitle\">Editing: ") +
-             (kb ? "Keyboard profile" : "Controller profile") +
+             (kb ? "Keyboard profile" : "Player " + std::to_string(ctl_player_ + 1) + " controller profile") +
              "</div><div class=\"pspacer\"></div><div id=\"c-back\" class=\"button "
              "focusable\" act=\"ctl-back\">Go back</div>";
     s += "</div>";
+    if (!kb && cfg_.port && cfg_.port->controller_camera) {
+        s += row_radio(controller_mode_key(ctl_player_), "Controller mode",
+                       {{"inherit", "Use main setting"}, {"classic", "Classic"}, {"modern", "Modern"}},
+                       controller_mode_override(draft_, ctl_player_),
+                       "Overrides the main controller mode for player " + std::to_string(ctl_player_ + 1) +
+                       ". Use main setting follows the mode selected at the top of Controls. Apply to save.", true);
+    }
     const auto& dev = editing();
     const std::string how =
         kb ? "Click a box, or press Enter on it, then press the key to use. Escape cancels."
@@ -772,8 +788,8 @@ std::string MenuUi::controls_mappings() {
                  "cancels.";
     const std::string who = kb ? "The keyboard plays as player 1, together with the first "
                                  "controller."
-                               : "Every controller uses this profile; controller 1 plays as "
-                                 "player 1, controller 2 as player 2.";
+                               : "Button bindings are shared by all controllers. The control mode override "
+                                 "applies only to player " + std::to_string(ctl_player_ + 1) + ".";
     for (const auto& r : kCtlRows) {
         const unsigned i = static_cast<unsigned>(r.c);
         const std::string key = id_safe(dream::render::pad_control_key(r.c));
@@ -1285,7 +1301,7 @@ void MenuUi::back() {
     }
     if (panel_ && tab_ == 1 && ctl_view_ == 1) {
         ctl_view_ = 0;
-        want_focus_ = "c-edit-0";
+        want_focus_ = "c-edit-" + std::to_string(ctl_player_);
         dirty_ = true;
         return;
     }
@@ -1383,7 +1399,8 @@ void MenuUi::run_act(const std::string& act, Rml::Event* ev) {
     } else if (kind == "ctl-edit") {
         const unsigned p = static_cast<unsigned>(std::atoi(arg.c_str()));
         ctl_view_ = 1;
-        ctl_device_ = p < pads_.size() ? 1 : 0;
+        ctl_player_ = std::min(p, 3u);
+        ctl_device_ = p > 0 || p < pads_.size() ? 1 : 0;
         want_focus_ = "s-" + id_safe(dream::render::pad_control_key(kCtlRows[0].c)) + "-0";
         dirty_ = true;
     } else if (kind == "ctl-back") {
@@ -1411,6 +1428,8 @@ void MenuUi::run_act(const std::string& act, Rml::Event* ev) {
     } else if (kind == "ctl-reset") {
         const auto d = dream::render::Bindings::defaults();
         editing() = ctl_device_ == 0 ? d.keyboard : d.gamepad;
+        if (ctl_device_ == 1 && cfg_.port && cfg_.port->controller_camera)
+            draft_.set(controller_mode_key(ctl_player_), "inherit");
         save_bindings();
         dirty_ = true;
     } else if (kind == "rebind") {

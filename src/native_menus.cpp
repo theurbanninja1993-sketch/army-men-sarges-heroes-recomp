@@ -2,6 +2,7 @@
 #include "dream/runtime/host_ext.h"
 #include "dream/runtime/system.h"
 #include "dream/render/input.h"
+#include "game_layout.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
@@ -14,10 +15,11 @@
 #include <vector>
 
 namespace {
+namespace layout = army::layout;
 using dream::render::PadControl;
 constexpr char alphabet[] = "BCDFGHJKLMNPQRSTVWXZ";
-constexpr std::uint32_t buffer = 0x8c1a5338u, length = 0x8c1a5350u;
-constexpr std::uint32_t key_row = 0x8c1a5358u, key_column = 0x8c1a5360u;
+constexpr std::uint32_t buffer = layout::password_buffer, length = layout::password_length;
+constexpr std::uint32_t key_row = layout::password_row, key_column = layout::password_column;
 enum class Kind { None, Main, Options, Password, Panel, Title, SavePrompt };
 struct Context {
     Kind kind = Kind::None;
@@ -32,21 +34,23 @@ bool ram(std::uint32_t p, unsigned size) {
     return (p & 0xff000000u) == 0x8c000000u && (p & 0xffffffu) <= 0x1000000u - size;
 }
 Context context(dream::Memory& m) {
-    const auto phase = m.read32(0x8c18ed1cu);
+    const auto phase = m.read32(layout::mission_phase);
     // Initial title/frontend uses 0; returning menus use 7. The screen index
     // remains stale in gameplay, so it cannot identify an active menu alone.
-    if ((phase == 0 || phase == 7) && m.read32(0x8c0eb1d0u) == 7 && m.read32(0x8c1a3c28u) == 5)
-        return {Kind::SavePrompt, 5, false};
-    if ((phase == 0 || phase == 7) && m.read32(0x8c0eb1d0u) == 4) return {Kind::Title, 0, false};
-    if ((phase == 0 || phase == 7) && m.read32(0x8c0eb1d0u) == 5) {
-        const auto sub = m.read32(0x8c1a53c0u);
+    const auto dialog = m.read32(layout::save_dialog);
+    if ((phase == 0 || phase == 7) && m.read32(layout::frontend_screen) == 7 &&
+        (dialog == 5 || (layout::extra_save_prompt && dialog == layout::extra_save_prompt)))
+        return {Kind::SavePrompt, dialog, false};
+    if ((phase == 0 || phase == 7) && m.read32(layout::frontend_screen) == 4) return {Kind::Title, 0, false};
+    if ((phase == 0 || phase == 7) && m.read32(layout::frontend_screen) == 5) {
+        const auto sub = m.read32(layout::frontend_submenu);
         if (sub <= 2) return {sub == 0 ? Kind::Main : sub == 1 ? Kind::Options : Kind::Password,
-                              0, m.read8(0x8c1a4df0u) != 0};
+                              0, m.read8(layout::menu_help) != 0};
     }
     if (phase == 3) {
-        const auto player = m.read32(0x8c18cc70u);
+        const auto player = m.read32(layout::active_player);
         if (player > 0 && player <= 4) {
-            const auto p = m.read32(0x8c0cfda0u + 4 * player);
+            const auto p = m.read32(layout::panel_table + 4 * player);
             if (ram(p, 28) && m.read32(p) && m.read32(p + 16) > 0 &&
                 m.read32(p + 16) <= 32 && ram(p, 28 + 24 * m.read32(p + 16)))
                 return {Kind::Panel, p, false};
@@ -79,16 +83,19 @@ class NativeMenus final : public dream::host::Extension {
     }
     bool point(dream::Memory& m, float x, float y) {
         if (current_.help || !std::isfinite(x) || !std::isfinite(y)) return false;
-        if (current_.kind == Kind::SavePrompt)
+        if (current_.kind == Kind::SavePrompt) {
+            if (layout::extra_save_prompt && current_.panel == layout::extra_save_prompt)
+                return y >= 150 && y <= 165 && x >= 40 && x <= 280;
             return y >= 88 && y <= 106 && ((x >= 40 && x <= 102) || (x >= 113 && x <= 280));
+        }
         if (current_.kind == Kind::Title) return x >= 0 && x <= 320 && y >= 0 && y <= 240;
         if (current_.kind == Kind::Main || current_.kind == Kind::Options) {
             const int row = int(std::floor((y - 48) / 21));
             const int count = current_.kind == Kind::Main ? 6 : 5;
             if (x < 148 || x > 284 || row < 0 || row >= count || y > 64.f + static_cast<float>(row) * 21.f)
                 return false;
-            if (current_.kind == Kind::Main && row == 5 && m.read8(0x8c1a5018u)) return false;
-            m.write32(current_.kind == Kind::Main ? 0x8c1a4de0u : 0x8c1a4de8u, row);
+            if (current_.kind == Kind::Main && row == 5 && m.read8(layout::load_disabled)) return false;
+            m.write32(current_.kind == Kind::Main ? layout::main_row : layout::options_row, row);
             return true;
         }
         if (current_.kind == Kind::Password) {
@@ -127,10 +134,14 @@ class NativeMenus final : public dream::host::Extension {
         if (a.op == Op::Move) { point(m, a.x, a.y); return; }
         if (a.op == Op::Click) {
             if (!point(m, a.x, a.y)) return;
-            if (current_.kind == Kind::SavePrompt) button(a.x < 110 ? PadControl::A : PadControl::B);
+            if (current_.kind == Kind::SavePrompt) {
+                const float split = layout::extra_save_prompt && current_.panel == layout::extra_save_prompt
+                    ? 140.0f : 110.0f;
+                button(a.x < split ? PadControl::A : PadControl::B);
+            }
             else if (current_.kind == Kind::Title) button(PadControl::Start);
             else if (current_.kind == Kind::Options) button(a.x < 220 ? PadControl::Left : PadControl::Right);
-            else if (current_.kind == Kind::Main && m.read32(0x8c1a4de0u) == 0) button(PadControl::Right);
+            else if (current_.kind == Kind::Main && m.read32(layout::main_row) == 0) button(PadControl::Right);
             else if (current_.kind == Kind::Panel) {
                 const auto i = m.read32(current_.panel + 8);
                 const auto value = m.read32(current_.panel + 28 + 24 * i + 12);
@@ -148,7 +159,7 @@ class NativeMenus final : public dream::host::Extension {
                         m.write8(buffer + n++, ch);
                 }
                 m.write8(buffer + n, 0); m.write32(length, n);
-                m.write32(0x8c1a5348u, 0x8c0ed6f3u); // clear the previous result message
+                m.write32(layout::password_result, layout::empty_message); // clear the previous result message
             } else if (a.op == Op::Erase || a.op == Op::Clear) erase(m, a.op == Op::Clear);
             else if (a.op == Op::Enter) {
                 m.write32(key_row, 2); m.write32(key_column, 1); button(PadControl::A);
@@ -259,8 +270,8 @@ public:
             std::lock_guard lock(mutex_);
             if (trace_ && !(current_ == next))
                 std::printf("Army menu context frame %llu phase %u screen %u sub %u kind %u -> %u pointer %d\n",
-                    static_cast<unsigned long long>(sys.spg.frames()),sys.memory.read32(0x8c18ed1cu),
-                    sys.memory.read32(0x8c0eb1d0u),sys.memory.read32(0x8c1a53c0u),
+                    static_cast<unsigned long long>(sys.spg.frames()),sys.memory.read32(layout::mission_phase),
+                    sys.memory.read32(layout::frontend_screen),sys.memory.read32(layout::frontend_submenu),
                     unsigned(current_.kind),unsigned(next.kind),bool(dream::host::host_controls().set_pointer_input));
             if (!(current_ == next) || host_menu() || cancel_input_) {
                 actions_.clear(); buttons_.clear(); pulse_ticks_ = release_ticks_ = 0;
@@ -303,7 +314,7 @@ public:
             for (unsigned i=0;i<12;++i) code[i]=char(sys.memory.read8(buffer+i));
             std::printf("Army menu frame %llu kind %u panel %08x row %u code [%s] length %u\n",
                 static_cast<unsigned long long>(frame), unsigned(next.kind), next.panel,
-                sys.memory.read32(0x8c1a4de0u),code,sys.memory.read32(length));
+                sys.memory.read32(layout::main_row),code,sys.memory.read32(length));
         }
     }
 };

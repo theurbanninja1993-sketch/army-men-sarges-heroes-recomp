@@ -1,5 +1,7 @@
 #include "widescreen.h"
 #include "dreamcomp/hook.h"
+#include "dream/runtime/system.h"
+#include "game_layout.h"
 
 #include <algorithm>
 #include <cmath>
@@ -18,12 +20,22 @@ float original_projection_x = 0.0f;
 // the widescreen factor, rather than replacing a split viewport with 16:9.
 std::unordered_map<std::uint32_t, float> camera_original_aspect;
 std::unordered_map<std::uint32_t, float> camera_written_aspect;
+// Cameras can copy another camera after its aspect was expanded. Retain the
+// origin of written values so a cloned viewport is not expanded a second time.
+std::unordered_map<float, float> written_aspect_origins;
 float traced_aspect = -1.0f;
 }
 
-void army_set_aspect(dream::System&, float aspect) {
+void army_set_aspect(dream::System& sys, float aspect) {
     const float next = std::clamp(aspect, original_aspect, 16.0f / 9.0f);
     if (next != target_aspect) {
+        // A settings change starts from native ratios, not our last widened values.
+        for (const auto& [camera, written] : camera_written_aspect) {
+            const auto original = camera_original_aspect.find(camera);
+            if (original != camera_original_aspect.end() &&
+                dreamcomp::read_f32(sys.memory, camera + 0xe8) == written)
+                dreamcomp::write_f32(sys.memory, camera + 0xe8, original->second);
+        }
         camera_original_aspect.clear();
         camera_written_aspect.clear();
     }
@@ -41,11 +53,15 @@ void army_camera_aspect(dream::Memory& memory, std::uint32_t camera) {
         return;
     }
     const auto written = camera_written_aspect.find(camera);
-    if (written == camera_written_aspect.end() || existing != written->second)
-        camera_original_aspect[camera] = existing;  // the game set a new viewport
+    if (written == camera_written_aspect.end() || existing != written->second) {
+        const auto inherited = written_aspect_origins.find(existing);
+        camera_original_aspect[camera] = inherited == written_aspect_origins.end()
+            ? existing : inherited->second;
+    }
     const float scaled = camera_original_aspect[camera] * (target_aspect / original_aspect);
     dreamcomp::write_f32(memory, camera + 0xe8, scaled);
     camera_written_aspect[camera] = scaled;
+    written_aspect_origins[scaled] = camera_original_aspect[camera];
     if (std::getenv("ARMY_TRACE_ASPECT") && scaled != traced_aspect) {
         std::printf("aspect camera=%08x original=%g scaled=%g target=%g\n", camera,
                     camera_original_aspect[camera], scaled, target_aspect);
@@ -56,7 +72,7 @@ void army_camera_aspect(dream::Memory& memory, std::uint32_t camera) {
 DC_HOOK_ENTRY(projection_submit) {
     // fn_0c057150 has just rebuilt this matrix, with horizontal focal scale at +0.
     // Patch before the copy into renderer globals, after that recomputation.
-    if ((c.pr & 0x1fffffffu) == 0x0c05720au && target_aspect > original_aspect + 0.001f) {
+    if ((c.pr & 0x1fffffffu) == army::layout::projection_caller && target_aspect > original_aspect + 0.001f) {
         const auto address = c.r[4];
         const float scale = dreamcomp::read_f32(m, address);
         submitted_projection = address;

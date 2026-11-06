@@ -195,6 +195,7 @@ private:
     dream::render::Bindings bindings_;
     bool bindings_loaded_ = false;
     int ctl_view_ = 0;    // 0 player cards, 1 mappings
+    unsigned ctl_player_ = 0;
     int ctl_device_ = 1;  // 0 keyboard, 1 controller
     struct Capture {
         bool active = false;

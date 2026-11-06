@@ -599,8 +599,9 @@ struct Live {
         // than a copy of it squeezed back through the guest's pixel format. This is also what makes
         // --scale visible: the window gets the full rendered resolution.
         // Not while a rebuilt target waits for its first render: its image is not drawn yet.
-        from_renderer = described && fb.enabled && rendered_into(fb.address) && !await_render;
-        if (from_renderer) {
+        const bool renderer_frame = described && fb.enabled && rendered_into(fb.address) && !await_render;
+        if (renderer_frame) {
+            from_renderer = true;
             shown = fb;
             shown.width = offscreen.width();
             shown.height = offscreen.height();
@@ -609,8 +610,14 @@ struct Live {
                    dream::render::decode_framebuffer(fb, memory_.vram(),
                                                      dream::mem::DcMemory::kVramSize, pixels)) {
             shown = fb;
+            from_renderer = false;
             have_frame = true;
             ++decoded_frames;
+        } else {
+            // A program handoff can disable the guest display between two render sources.
+            // Leave the last presented swapchain image up. Reusing `shown` here would pair
+            // an old GPU frame's dimensions with an empty/stale CPU pixel buffer.
+            return true;
         }
         if (!have_frame)
             return true;  // nothing displayable yet: the window keeps its cleared background
@@ -2338,6 +2345,10 @@ int main(int argc, char** argv) {
                         static_cast<char>('A' + port));
         }
     };
+    // Diagnostic second controller for deterministic multiplayer bring-up; neutral outside
+    // the requested guest-frame interval. Normal host device enumeration is unchanged.
+    const char* test_pad2 = std::getenv("DREAM_TEST_PAD2");
+    if (test_pad2) sync_ports(2);
     sys.memory.map_mmio(dream::maple::Bus::kBase, dream::maple::Bus::kEnd, &maple);
     // Scripted controller presses (--press start@120,a@300): each is held for 8 frames.
     std::vector<std::pair<std::uint64_t, std::uint16_t>> scripted;
@@ -2375,6 +2386,15 @@ int main(int argc, char** argv) {
                 if (f >= start && f < start + 8)
                     held |= bit;
             pad_ptr->state.buttons = static_cast<std::uint16_t>(0xFFFFu & ~held);
+        }
+        if (test_pad2 && port_pads[1]) {
+            unsigned long long from = 0, to = 0;
+            unsigned held = 0;
+            if (std::sscanf(test_pad2, "%llu:%llu:%x", &from, &to, &held) == 3) {
+                const auto f = sys.spg.frames();
+                port_pads[1]->state.buttons = static_cast<std::uint16_t>(
+                    ~(f >= from && f < to ? held : 0u));
+            }
         }
         // EXP matrix hook: DREAM_EXP_ROT="addr:deg:from:to" rotates a 4x4 matrix in guest RAM about Y
         // each vblank in [from, to). Development only.
@@ -2498,23 +2518,23 @@ int main(int argc, char** argv) {
                     if (e->map_keyboard(physical, logical)) return true;
                 return false;
             };
-            lp->window.controller_map = [lp](const dream::render::GamepadSample& physical,
+            lp->window.controller_map_player = [lp](unsigned player, const dream::render::GamepadSample& physical,
                                              dream::render::GamepadSample& logical) {
                 if (lp->menu.is_open() || lp->overlay_open()) return false;
                 for (auto* e : dream::host::extensions())
-                    if (e->map_controller(physical, logical)) return true;
+                    if (e->map_controller_player(player, physical, logical)) return true;
                 return false;
             };
-            lp->window.controller_camera_enabled = [lp] {
+            lp->window.controller_camera_enabled_player = [lp](unsigned player) {
                 if (lp->menu.is_open() || lp->overlay_open()) return false;
                 for (auto* e : dream::host::extensions())
-                    if (e->controller_camera_enabled()) return true;
+                    if (e->controller_camera_enabled_player(player)) return true;
                 return false;
             };
-            lp->window.controller_camera = [lp](float x, float y, bool active) {
+            lp->window.controller_camera_player = [lp](unsigned player, float x, float y, bool active) {
                 active = active && !lp->menu.is_open() && !lp->overlay_open();
                 for (auto* e : dream::host::extensions())
-                    e->on_controller_camera(active ? x : 0, active ? y : 0, active);
+                    e->on_controller_camera_player(player, active ? x : 0, active ? y : 0, active);
             };
         }
         // dreamcomp: an extension's in-game overlay takes Escape and the pad's Back button, sees
@@ -2670,9 +2690,9 @@ int main(int argc, char** argv) {
                 // open.
                 if (scripted.empty() || pad_ptr->state.buttons == 0xFFFFu)
                     live->read_controls(pad_ptr->state, 0);
-                sync_ports(live->window.players());
+                sync_ports(test_pad2 ? std::max(2u, live->window.players()) : live->window.players());
                 for (unsigned port = 1; port < port_pads.size(); ++port)
-                    if (port_pads[port])
+                    if (port_pads[port] && !(test_pad2 && port == 1))
                         live->read_controls(port_pads[port]->state, port);
                 live->pacing.pads_read();
             };
@@ -3025,7 +3045,7 @@ int main(int argc, char** argv) {
     (void)replay_self_check;
     (void)replay_only;
 #endif
-    dream::sh4::GuestFn entry = dream::sh4::find_function(cfg.entry);
+    dream::sh4::GuestFn entry = dream::sh4::find_function(cfg.entry, &sys.memory);
     if (!entry) {
         std::fprintf(stderr, "no translated function at entry 0x%08x\n", cfg.entry);
         return 2;

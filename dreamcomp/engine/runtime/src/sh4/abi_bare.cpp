@@ -1,6 +1,8 @@
 // Harness implementation of the emitted-code ABI: a function table, direct calls, and hard
 // failures for anything that needs the real runtime (exceptions, interrupts, untranslated code).
 #include <algorithm>
+#include <bit>
+#include <cstring>
 #include <cstdio>
 #include <stdexcept>
 #include <string>
@@ -143,6 +145,25 @@ void set_interpret_functions(const std::vector<std::pair<std::uint32_t, std::uin
     flush_fn_cache();  // same reason as the range above
 }
 
+namespace {
+bool signature_matches(const FunctionEntry& entry, ::dream::Memory& memory, std::uint32_t address) {
+    const auto offset = address & 0x00ffffffu;
+    const auto bytes = static_cast<std::uint64_t>(entry.signature_words) * 2;
+    // Check the complete current body on every dispatch. RAM mirrors are contiguous only
+    // to the end of the 16 MiB backing; other memory implementations retain accessor reads.
+    if constexpr (std::endian::native == std::endian::little) {
+        if (memory.fast_ram && ::dream::Memory::is_ram(address) &&
+            bytes <= 0x01000000u - offset)
+            return std::memcmp(memory.fast_ram + offset, entry.signature,
+                               static_cast<std::size_t>(bytes)) == 0;
+    }
+    for (std::uint32_t i = 0; i < entry.signature_words; ++i)
+        if (memory.read16(address + 2 * i) != entry.signature[i])
+            return false;
+    return true;
+}
+}  // namespace
+
 GuestFn find_function(std::uint32_t address, ::dream::Memory* m) noexcept {
     const std::uint32_t phys = address & 0x1FFFFFFFu;
     FnCacheEntry& slot = g_fn_cache[fn_cache_slot(phys)];
@@ -164,10 +185,7 @@ GuestFn find_function(std::uint32_t address, ::dream::Memory* m) noexcept {
         }
         if (!m)
             continue;
-        bool same = true;
-        for (std::uint32_t i = 0; same && i < it->signature_words; ++i)
-            same = m->read16(address + 2 * i) == it->signature[i];
-        if (same)
+        if (signature_matches(*it, *m, address))
             return it->fn;
     }
     return nullptr;
@@ -202,10 +220,7 @@ const FunctionEntry* find_containing(std::uint32_t address, ::dream::Memory* m) 
             return &*it;
         if (!m)
             continue;
-        bool same = true;
-        for (std::uint32_t i = 0; same && i < it->signature_words; ++i)
-            same = m->read16(it->address + 2 * i) == it->signature[i];
-        if (same)
+        if (signature_matches(*it, *m, it->address))
             return &*it;
     }
     return nullptr;
@@ -218,6 +233,34 @@ bool trace_nonlocal() {
     return on;
 }
 }  // namespace
+
+namespace {
+thread_local unsigned indirect_depth = 0;
+struct TailRunner {
+    Ctx& context;
+    ::dream::Memory& memory;
+    const unsigned depth = indirect_depth;
+    TailRunner* previous;
+    bool pending = false;
+    std::uint32_t pc = 0;
+};
+thread_local TailRunner* tail_runner = nullptr;
+struct IndirectFrame {
+    IndirectFrame() { ++indirect_depth; }
+    ~IndirectFrame() { --indirect_depth; }
+};
+}  // namespace
+
+void tail_transfer(Ctx& c, ::dream::Memory& m, std::uint32_t pc) {
+    if (tail_runner && &tail_runner->context == &c && &tail_runner->memory == &m &&
+        indirect_depth == tail_runner->depth) {
+        c.pc = pc;
+        tail_runner->pc = pc;
+        tail_runner->pending = true;
+        return;
+    }
+    nonlocal_return(c, m, pc);
+}
 
 void nonlocal_return(Ctx& c, ::dream::Memory&, std::uint32_t pc) {
     if (trace_nonlocal())
@@ -243,6 +286,12 @@ void resume_at(Ctx& c, ::dream::Memory& m, std::uint32_t pc) {
                      e ? e->address : 0u, c.pr, c.r[15]);
     }
     c.pc = pc;
+    // A tail transfer can land on a native BIOS entry, whose table row has no
+    // guest-code extent. Resolve exact entries before looking for containing code.
+    if (GuestFn fn = find_function(pc, &m)) {
+        fn(c, m);
+        return;
+    }
     const std::uint32_t phys = pc & 0x1FFFFFFFu;
     if (!interpreted(phys)) {
         if (const FunctionEntry* e = find_containing(pc, &m)) {
@@ -262,6 +311,12 @@ void resume_at(Ctx& c, ::dream::Memory& m, std::uint32_t pc) {
 namespace {
 template <typename Start>
 void run_guest_impl(Ctx& c, ::dream::Memory& m, Start start) {
+    TailRunner runner{c, m, indirect_depth, tail_runner};
+    tail_runner = &runner;
+    struct RestoreRunner {
+        TailRunner* previous;
+        ~RestoreRunner() { tail_runner = previous; }
+    } restore{runner.previous};
     const std::uint32_t stop_pr = c.pr;
     std::uint32_t pc = 0;
     bool resumed = false;
@@ -269,11 +324,19 @@ void run_guest_impl(Ctx& c, ::dream::Memory& m, Start start) {
         try {
             if (!resumed) {
                 start();
-                return;  // the entry function returned through PR, as translated code does
+                if (!runner.pending)
+                    return;  // the entry function returned through PR
+            } else {
+                // After a non-local return, resume at its actual guest PC.
+                resume_at(c, m, pc);
             }
-            // After a non-local return the host stack no longer mirrors the guest's: every return
-            // comes back here and continues at PR.
-            resume_at(c, m, pc);
+            if (runner.pending) {
+                pc = runner.pc;
+                runner.pending = false;
+                if (pc == stop_pr) return;
+                resumed = true;
+                continue;
+            }
             if (c.pr == stop_pr)
                 return;
             if (trace_nonlocal())
@@ -285,6 +348,7 @@ void run_guest_impl(Ctx& c, ::dream::Memory& m, Start start) {
         } catch (const NonLocalReturn& n) {
             if (n.pc == stop_pr)
                 return;
+            runner.pending = false;
             pc = n.pc;
             resumed = true;
         }
@@ -293,7 +357,7 @@ void run_guest_impl(Ctx& c, ::dream::Memory& m, Start start) {
 }  // namespace
 
 void run_guest(Ctx& c, ::dream::Memory& m, std::uint32_t entry) {
-    run_guest_impl(c, m, [&] { call_indirect(c, m, entry); });
+    run_guest_impl(c, m, [&] { resume_at(c, m, entry); });
 }
 
 void run_guest(Ctx& c, ::dream::Memory& m, GuestFn entry) {
@@ -301,6 +365,7 @@ void run_guest(Ctx& c, ::dream::Memory& m, GuestFn entry) {
 }
 
 void call_indirect(Ctx& c, ::dream::Memory& m, std::uint32_t target) {
+    IndirectFrame frame;
     if (GuestFn fn = find_function(target, &m)) {
         fn(c, m);
         return;
