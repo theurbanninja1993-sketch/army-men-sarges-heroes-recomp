@@ -208,3 +208,67 @@ reaches `0x0c0263ba`, which calls `0x0c055728` with stream ID 45.
 The stream table at `0x8c0d6540`, entry size 12, points that ID to filename
 `0x8c0d6aeb`. These are facts about this disc image; they do not establish
 whether another retail disc revision includes that soundtrack.
+
+
+## Scorch target-marker follow-up (2026-11-06, investigating)
+
+User loaded and briefly played every PAL level, reporting full speed and no other
+visual issues. Scorch alone shows the bouncing auto-aim marker again; the same
+issue reproduces in NTSC. This is loading/gameplay coverage, not full completion
+of every level. The previous resident TCW exceptions remain in place.
+
+The original fix is keyed to exact VRAM texture words, and its findings explicitly
+left other missions' texture residency unverified. A different Scorch allocation
+is a plausible explanation, not yet established. Requested an F11 capture cluster
+from an affected Scorch enemy and the region used. The current capture-000 is the
+previous PAL multiplayer scope capture (guest3553), not Scorch evidence. No guessed
+texture IDs or broader HUD exclusions have been added. Publication remains pending.
+
+
+### PAL Scorch capture result
+
+Eight PAL captures (guest7004.. later frames; preserved with companions at
+`/tmp/army-scorch-pal-captures/`) identify marker TCW`0x9007ce78`, TSP`0x941024d2`.
+The decoded32x32 RGBA texture is byte-identical to the original USA marker,
+SHA-256 `3d5a53a2a2912bf8e93779d88b98dd5cc5a86016b3b2b1908bb6883ccac35b58`.
+Raw VRAM slices are not equivalent to decoded texels; use the engine texture decoder.
+
+Added that measured allocation to the separate PAL marker exception. In four of
+eight frames the previous HUD pass moves all6 marker vertices at16:9; worst
+X displacement23.818787 logical pixels. The new exception preserves all48 native
+marker vertices across4:3,16:10,16:9 (144 checks), and every other vertex matches
+the preceding HUD output exactly. The original PAL first-mission capture also
+passes with no changed unrelated vertices. `armymensh_target_marker_check` is a
+capture-only regression target taking local TA/VRAM, target TCW and before/after
+rules; no captured assets are source fixtures.
+
+GPU replay of capture006 before/after visually confirms the ring remains over
+its native target; changed-pixel bbox738,412..830,471 at1280x720 is restricted to
+the marker area. Fix is data-only: restart the same PAL test command. Live user
+confirmation remains. Requested1–2 NTSC Scorch F11 captures to measure that
+region's allocation; no assumed PAL-to-NTSC offset has been applied.
+
+
+### NTSC Scorch confirmation
+
+Found the user's next4 captures in `work/src/dreamcomp/capture-000..003.*`,
+guest6076..6234. Captures are written relative to the game's launch directory.
+Preserved all companions at `/tmp/army-scorch-ntsc-captures/` before modifying rules.
+
+They measure NTSC Scorch marker TCW`0x9007ae78`, TSP`0x941024d2`. All4 decoded
+32x32 marker textures match the original USA and PAL Scorch pixels exactly.
+Added the measured address to the USA exception, retaining original`0x9007b3d0`.
+No PAL-to-NTSC address offset was assumed.
+
+Baseline shifts the ring in2/4 captures, maximum19.249603 logical pixels at16:9.
+All24 marker vertices retain native coordinates at4:3,16:10,16:9 after the fix
+(72 checks); every unrelated vertex matches the preceding HUD output exactly.
+The original USA marker capture and packaged NTSC multiplayer capture also pass
+unchanged-other-vertices checks. Vulkan replay of affected capture002 before/fixed
+was inspected. Both region fixes are data-only and ready for gameplay retesting.
+No release upload has occurred; the earlier preview archives still need refreshing.
+
+
+User confirmed the Scorch marker fix works during gameplay in both PAL and NTSC
+(2026-11-06). The reported issue is closed; both measured allocations remain in
+their respective HUD rule files.

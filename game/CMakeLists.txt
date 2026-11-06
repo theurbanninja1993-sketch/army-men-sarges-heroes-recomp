@@ -188,3 +188,8 @@ if(TARGET dreamcomp_frontend)
   target_include_directories(armymensh_controller_profiles_ui_tests PRIVATE ${DREAMCOMP_ROOT}/src/frontend)
   target_link_libraries(armymensh_controller_profiles_ui_tests PRIVATE dreamcomp_frontend RmlUi::RmlUi)
 endif()
+
+add_executable(armymensh_target_marker_check EXCLUDE_FROM_ALL
+  ${PROJECT_SOURCE_DIR}/tools/check_target_marker.cpp ${DREAMCOMP_ROOT}/src/hud.cpp)
+target_include_directories(armymensh_target_marker_check PRIVATE ${DREAMCOMP_ROOT}/include)
+target_link_libraries(armymensh_target_marker_check PRIVATE dream::render)

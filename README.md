@@ -18,10 +18,12 @@ The preview always loads **English at 60 Hz**. The original startup language/vid
 are overridden: other languages and 50 Hz are not implemented and previously crashed.
 PAL support for Windows is coming soon; the existing Windows stable release supports USA discs.
 
-Player testing covers the complete first campaign level and a short Snow level test, including
-its helicopter audio. Multiplayer setup, scope rendering and per-player controls have also
-been checked. The rest of the campaign, other multiplayer maps and sustained four-player play
-remain unverified; please report the level/map and reproduction steps with any issues.
+Player testing covers the complete first campaign level and loading/brief gameplay in every
+PAL mission, reported to run at full speed. Snow's helicopter audio was also checked.
+A Scorch auto-aim marker issue was reported in both PAL and NTSC. Capture-based corrections
+are implemented, verified and confirmed during gameplay in both regions. Multiplayer setup, scope rendering and per-player controls have been checked.
+Complete campaign playthroughs, other multiplayer maps and sustained four-player play remain
+unverified; please report the level/map and reproduction steps with any issues.
 
 PAL has a separate default memory card in `dreamcomp/armymensh_pal_en60`; launcher settings
 remain shared. Existing cards are not converted between regions. A custom `--vmu` path is
