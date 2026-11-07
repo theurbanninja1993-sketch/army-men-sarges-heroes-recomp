@@ -223,9 +223,11 @@ struct Pacing {
         std::uint64_t frame;
         float ms;
         std::uint64_t textures, pipelines;
-        float render_ms, decode_ms;
+        float render_ms, decode_ms, present_ms, input_ms;
     };
+    // Keep the worst frames across the run, rather than filling this with FMV startup frames.
     std::vector<Late> late_frames;
+    float present_ms = 0, input_ms = 0;
     // Input age (dreamcomp): from reading the pads to presenting the frame the guest ran with them.
     std::vector<float> input_age_ms;
     std::chrono::steady_clock::time_point input_read{};
@@ -243,11 +245,20 @@ struct Pacing {
         if (last.time_since_epoch().count() != 0 && intervals_ms.size() < 2'000'000) {
             const float ms = std::chrono::duration<float, std::milli>(now - last).count();
             intervals_ms.push_back(ms);
-            if (ms > 20.0f && late_frames.size() < 64)
-                late_frames.push_back({frame, ms, textures - last_textures,
-                                       pipelines - last_pipelines,
-                                       static_cast<float>(render_ns - last_render_ns) * 1e-6f,
-                                       static_cast<float>(decode_ns - last_decode_ns) * 1e-6f});
+            if (ms > 20.0f) {
+                const Late sample{frame, ms, textures - last_textures,
+                                  pipelines - last_pipelines,
+                                  static_cast<float>(render_ns - last_render_ns) * 1e-6f,
+                                  static_cast<float>(decode_ns - last_decode_ns) * 1e-6f,
+                                  present_ms, input_ms};
+                if (late_frames.size() < 64) {
+                    late_frames.push_back(sample);
+                } else {
+                    auto smallest = std::min_element(late_frames.begin(), late_frames.end(),
+                        [](const Late& a, const Late& b) { return a.ms < b.ms; });
+                    if (sample.ms > smallest->ms) *smallest = sample;
+                }
+            }
         }
         last = now;
         last_textures = textures;
@@ -293,14 +304,18 @@ struct Pacing {
                         a[static_cast<std::size_t>(0.95 * (a.size() - 1))], a.back());
         }
         if (!late_frames.empty()) {
-            std::printf("pacing: late frames (guest frame: ms, textures decoded, pipelines made, "
-                        "render ms, of which texture decode ms):");
-            for (const auto& l : late_frames)
-                std::printf(" %llu:%.0f/%llut/%llup/%.0fr/%.0fd",
+            auto worst = late_frames;
+            std::sort(worst.begin(), worst.end(),
+                      [](const Late& a, const Late& b) { return a.frame < b.frame; });
+            std::printf("pacing: worst frames (guest frame: ms, textures decoded, pipelines made, "
+                        "render ms, of which texture decode ms, present ms, input ms):");
+            for (const auto& l : worst)
+                std::printf(" %llu:%.0f/%llut/%llup/%.0fr/%.0fd/%.0fpr/%.0fi",
                             static_cast<unsigned long long>(l.frame), static_cast<double>(l.ms),
                             static_cast<unsigned long long>(l.textures),
                             static_cast<unsigned long long>(l.pipelines),
-                            static_cast<double>(l.render_ms), static_cast<double>(l.decode_ms));
+                            static_cast<double>(l.render_ms), static_cast<double>(l.decode_ms),
+                            static_cast<double>(l.present_ms), static_cast<double>(l.input_ms));
             std::printf("\n");
         }
     }
@@ -2637,8 +2652,11 @@ int main(int argc, char** argv) {
                     precise_sleep_until(aim);
             }
             live->pacing.presenting();
+            const auto present_start = std::chrono::steady_clock::now();
             if (!live->present(sys.spg.frames(), sys.ctx.cycles))
                 throw StopRun{"the window was closed"};
+            live->pacing.present_ms = std::chrono::duration<float, std::milli>(
+                std::chrono::steady_clock::now() - present_start).count();
             // The binding screen stops the guest rather than drawing over a running one: nobody
             // rebinds a control mid-corner, and a control being captured cannot also be played.
             // The window keeps presenting, so the screen still draws and still answers the player.
@@ -2684,6 +2702,7 @@ int main(int argc, char** argv) {
             // frame that uses them: read before the sleep, the input was a sleep older (about
             // 10 ms at scale 2) by the time the game saw it.
             auto read_pads = [&] {
+                const auto input_start = std::chrono::steady_clock::now();
                 if (!live->poll_input())
                     throw StopRun{"the window was closed"};
                 // Scripted presses win while they are held, so --press still works with a window
@@ -2694,6 +2713,8 @@ int main(int argc, char** argv) {
                 for (unsigned port = 1; port < port_pads.size(); ++port)
                     if (port_pads[port] && !(test_pad2 && port == 1))
                         live->read_controls(port_pads[port]->state, port);
+                live->pacing.input_ms = std::chrono::duration<float, std::milli>(
+                    std::chrono::steady_clock::now() - input_start).count();
                 live->pacing.pads_read();
             };
             if (unthrottled) {
