@@ -44,3 +44,57 @@ validation are recorded in the workspace HANDOFF.md.
 Next native check: use diagnostic ZIP, 2x / Auto / exact 59.94, repeat same opening
 and gameplay until the stall occurs; quit normally to emit the report and provide
 its log. A smooth run is not proof of a fix. Keep the original package for A/B.
+
+## Stack profile and opt-in experiment (2026-11-08)
+
+Native test6 collected 6,709 samples over70.94s at10,000us intervals, zero failures.
+The exact test2 PAL map resolves1,499 samples (22.3%) through nonlocal_return;
+1,485 (22.1%) include C++ exception throwing, and1,434 (21.4%) include tail_transfer.
+Normal frame pacing sleep accounts for2,381 (35.5%) samples. These are inclusive,
+aggregate wall-time sample shares, not additive CPU utilization or a timeline that
+identifies which samples coincide with each stall. Native test6 still had a328.3ms
+worst frame and93.51ms p99. This gives a concrete CPU overhead lead, not a proven
+explanation for intermittent stalls.
+
+Many nested overlay tail edges cannot use the existing top-level TailRunner because
+indirect_depth differs. They throw NonLocalReturn to unwind to run_guest. The
+experimental DREAM_LOCAL_TAILS=1 path installs a runner around each indirect call
+and consumes only explicitly deferred tail_transfer targets there. NonLocalReturn
+is never caught by these runners: real task switches/nonlocal returns still unwind
+to run_guest. The option is disabled by default, so native A/B can use one package.
+
+Focused control-flow tests run separately with the option off/on:100,000 nested
+tail iterations, continuation inside a translated function, tail return to caller,
+genuine nonlocal escape, and runner restoration after exception unwinding. Five
+tests /16 assertions pass in each mode (five tests total). The normal path still dispatches through
+find_function/resume_at, preserving overlay signature checks and hooks.
+
+Use the experimental package with the environment variable set before launching:
+
+```powershell
+$env:DREAM_LOCAL_TAILS = "1"
+.\army-men-sarges-heroes-recomp.exe --launcher --profile cpu-profile-test7.txt --profile-interval 10000 > gameplay-log-test7.txt 2>&1
+```
+
+Keep2x/Auto/exact59.94 and the same route. Exit normally and compare both logs.
+Set DREAM_LOCAL_TAILS to0 or remove it to select the original dispatcher. No native
+performance improvement or stall fix is claimed until the laptop confirms it.
+
+
+The experiment keeps the existing dispatcher while in a delivered interrupt frame,
+so interrupt tail/RTE bookkeeping uses its original unwind path. A resumed block
+whose final PR differs from the original call return also forces nonlocal unwind.
+These edge cases have focused tests. Windows-compiled versions of all five tests
+pass with the switch off/on under Wine, as do the Linux-compiled tests.
+
+Deterministic first-mission checks at8450 guest frames: USA full16MiB RAM identical
+between off/on. PAL both reach phase3 with exactly matching camera pointer, player
+position, yaw and pitch, zero untranslated calls, and zero task-switching RTEs after
+narrowing the experiment to ordinary calls. PAL full RAM is not byte-identical: a
+reference using the same VMU differs in195 bytes, with10 guest cycles difference at
+the frame-bound stop. Full state equivalence and gameplay parity are NOT established.
+An earlier broader prototype changed interrupt unwinding and was narrowed before
+packaging. Wine PAL headless run87.47s off vs33.12s on; USA22.11s off vs22.83s on.
+These timings are local observations, not native Windows benchmarks. The native
+laptop must confirm stall behavior and game correctness. The option remains OFF by
+default and is not proposed for a stable release yet.

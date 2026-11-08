@@ -4,6 +4,7 @@
 #include <bit>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -364,8 +365,8 @@ void run_guest(Ctx& c, ::dream::Memory& m, GuestFn entry) {
     run_guest_impl(c, m, [&] { entry(c, m); });
 }
 
-void call_indirect(Ctx& c, ::dream::Memory& m, std::uint32_t target) {
-    IndirectFrame frame;
+namespace {
+void dispatch_indirect(Ctx& c, ::dream::Memory& m, std::uint32_t target) {
     if (GuestFn fn = find_function(target, &m)) {
         fn(c, m);
         return;
@@ -398,6 +399,45 @@ void call_indirect(Ctx& c, ::dream::Memory& m, std::uint32_t target) {
         return;
     }
     throw std::runtime_error("untranslated call target " + hex(target) + " from pc " + hex(c.pc));
+}
+
+}  // namespace
+
+void call_indirect(Ctx& c, ::dream::Memory& m, std::uint32_t target) {
+    IndirectFrame frame;
+    // Diagnostic opt-in: routine overlay tail jumps need not unwind every caller.
+    // Each indirect call has a runner at its own depth. True non-local returns still
+    // throw through this scope to run_guest; never catch them at a guest call boundary.
+    static const bool local_tails = [] {
+        const char* e = std::getenv("DREAM_LOCAL_TAILS");
+        const bool enabled = e && *e == '1';
+        if (enabled) std::printf("dispatch: experimental local tail runners enabled\n");
+        return enabled;
+    }();
+    // Interrupt delivery owns an extra host frame and its RTE bookkeeping.
+    // Preserve its original unwind path while evaluating ordinary-call tails.
+    if (!local_tails || (g_hooks && g_hooks->in_exception_frame())) {
+        dispatch_indirect(c, m, target);
+        return;
+    }
+    TailRunner runner{c, m, indirect_depth, tail_runner};
+    tail_runner = &runner;
+    struct RestoreRunner {
+        TailRunner* previous;
+        ~RestoreRunner() { tail_runner = previous; }
+    } restore{runner.previous};
+    const std::uint32_t return_pc = c.pr;
+    dispatch_indirect(c, m, target);
+    while (runner.pending) {
+        const auto pc = runner.pc;
+        runner.pending = false;
+        if (pc == return_pc) return;
+        resume_at(c, m, pc);
+        // Resume entries deliberately leave their final PR to the runner. A
+        // different PR abandons this call, rather than returning to its C++ caller.
+        if (!runner.pending && c.pr != return_pc)
+            nonlocal_return(c, m, c.pr);
+    }
 }
 
 void deliver_irq(Ctx& c, ::dream::Memory& m) {
