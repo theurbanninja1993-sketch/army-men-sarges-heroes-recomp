@@ -35,7 +35,11 @@ The Windows PAL English/60 Hz test package is for native Windows validation befo
 Extract the complete ZIP and run `army-men-sarges-heroes-recomp.exe`, then select your PAL
 disc normally. Keep `armymensh_pal_controls.exe`, `SDL3.dll`, the configuration files and
 `frontend` folder together. Both USA and PAL are included; PAL uses a separate default memory
-card. This test package has not yet been confirmed through gameplay on native Windows.
+card. Native Windows laptop testing has confirmed normal gameplay, controls and cutscenes
+with both USA and PAL discs at 4x resolution. The current test package enables the
+Windows control-flow performance fix by default; it no longer needs an environment
+variable. Full Windows campaign coverage remains pending. An intermittent PAL
+subtitle-box flicker remains under investigation.
 
 ## Play
 

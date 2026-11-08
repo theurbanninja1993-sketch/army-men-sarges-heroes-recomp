@@ -58,7 +58,12 @@ TEST_CASE("nested overlay tail chain returns to its caller without growing the s
     CHECK(c.r[0] == 0);
     CHECK(c.r[2] == 1);
     const char* flag = std::getenv("DREAM_LOCAL_TAILS");
-    CHECK(unwinds == (flag && *flag == '1' ? 0u : 1u));
+#ifdef _WIN32
+    const bool enabled = flag && *flag ? *flag == '1' : true;
+#else
+    const bool enabled = flag && *flag ? *flag == '1' : false;
+#endif
+    CHECK(unwinds == (enabled ? 0u : 1u));
 }
 
 TEST_CASE("true nonlocal return still abandons nested callers and restores tail runners") {

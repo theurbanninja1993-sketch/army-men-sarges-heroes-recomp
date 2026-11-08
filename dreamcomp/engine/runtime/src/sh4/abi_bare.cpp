@@ -405,13 +405,19 @@ void dispatch_indirect(Ctx& c, ::dream::Memory& m, std::uint32_t target) {
 
 void call_indirect(Ctx& c, ::dream::Memory& m, std::uint32_t target) {
     IndirectFrame frame;
-    // Diagnostic opt-in: routine overlay tail jumps need not unwind every caller.
+    // Routine overlay tail jumps need not unwind every caller.
     // Each indirect call has a runner at its own depth. True non-local returns still
     // throw through this scope to run_guest; never catch them at a guest call boundary.
     static const bool local_tails = [] {
         const char* e = std::getenv("DREAM_LOCAL_TAILS");
-        const bool enabled = e && *e == '1';
-        if (enabled) std::printf("dispatch: experimental local tail runners enabled\n");
+#ifdef _WIN32
+        constexpr bool default_enabled = true;
+#else
+        constexpr bool default_enabled = false;
+#endif
+        // Keep the original path available for diagnosis; Linux stays opt-in.
+        const bool enabled = e && *e ? *e == '1' : default_enabled;
+        if (enabled) std::printf("dispatch: local tail runners enabled\n");
         return enabled;
     }();
     // Interrupt delivery owns an extra host frame and its RTE bookkeeping.

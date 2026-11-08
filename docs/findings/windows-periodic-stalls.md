@@ -98,3 +98,30 @@ packaging. Wine PAL headless run87.47s off vs33.12s on; USA22.11s off vs22.83s o
 These timings are local observations, not native Windows benchmarks. The native
 laptop must confirm stall behavior and game correctness. The option remains OFF by
 default and is not proposed for a stable release yet.
+
+## Native confirmation and Windows default (2026-11-08)
+
+The user confirmed test8 was normal in gameplay/controls/cutscenes and test9 ran
+well at4x. Test8 explicitly enabled local tails: p9918.48ms/max51.7ms,3of8844intervals
+above33ms; exception-throw samples248/14139=1.75%. Inactive test7 was p9939.91ms/
+max89.2ms,407of9332above33ms;throw samples2764/15807=17.49%. Initial inactive test6
+had p9993.51ms/max328.3ms. Runs/routes differ, so these are observed improvements,
+not a controlled benchmark isolating every source of intermittent stalls.
+
+Active PAL4x test9: p9918.47ms,13of7546above33ms,zero untranslated/audio drops and
+underruns;throw samples247/12173=2.03%. Native NTSC4x test10 was also reported normal:
+p9918.17ms,5of8788above20ms and2above33ms,zero untranslated/audio drops/underruns.
+Its1025ms maximum is exactly guestframe4438, where F11 capture wrote its files;
+1019ms is inside presentation. Exclude that deliberate capture hitch from spontaneous
+stall claims. Another169ms frame inside presentation remains in this run.
+
+After these native checks, Windows defaults to local tail runners. Linux retains
+the original default. DREAM_LOCAL_TAILS=0 selects the original dispatcher for A/B;
+1 enables the optimized path on either platform. Empty/unset uses the platform
+default. Unit checks cover0/1/unset on both Linux and Windows-under-Wine. Guest
+control-flow semantics are unchanged from the opt-in test3 binary; only selection
+and log wording changed. Broader Windows campaign coverage is still pending.
+
+Intermittent PAL subtitle-box flicker remains open and also occurred while the
+optimization was disabled. USA's missing opening subtitles are original disc
+content, established separately in cutscene-subtitles.md; no subtitle fix was made.
