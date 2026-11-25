@@ -1,3 +1,4 @@
+#include <chrono>
 // See window.h.
 #include "dream/render/vk/window.h"
 
@@ -935,10 +936,16 @@ bool Window::begin_frame(std::uint32_t& image_index, VkCommandBuffer& cmd) {
         // DXGI: one shared image per frame in flight; its fence says Vulkan is done with it, its
         // keyed mutex (in the submit) that D3D11 is.
         // (The latency object is checked by present(), never waited on here.)
-        vkWaitForFences(ctx_.device(), 1, &fences_[frame_], VK_TRUE, UINT64_MAX);
+        const auto wait_start = std::chrono::steady_clock::now();
+    vkWaitForFences(ctx_.device(), 1, &fences_[frame_], VK_TRUE, UINT64_MAX);
+    fence_wait_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - wait_start).count();
         image_index = frame_;
     } else {
+    const auto wait_start = std::chrono::steady_clock::now();
     vkWaitForFences(ctx_.device(), 1, &fences_[frame_], VK_TRUE, UINT64_MAX);
+    fence_wait_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - wait_start).count();
     const VkResult r = vkAcquireNextImageKHR(ctx_.device(), swapchain_, UINT64_MAX,
                                              acquired_[frame_], VK_NULL_HANDLE, &image_index);
     // SUBOPTIMAL still acquired the image and will signal the semaphore: carry on with this frame

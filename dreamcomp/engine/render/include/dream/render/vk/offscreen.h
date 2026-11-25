@@ -27,6 +27,8 @@ namespace dream::render::vk {
 
 class Offscreen {
 public:
+    // Cumulative host wall time inside Vulkan fence waits (not GPU execution time).
+    std::uint64_t fence_wait_ns = 0;
     Offscreen() = default;
     ~Offscreen();
     Offscreen(const Offscreen&) = delete;

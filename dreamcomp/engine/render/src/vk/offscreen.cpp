@@ -1,3 +1,4 @@
+#include <chrono>
 // See offscreen.h.
 #include "dream/render/vk/offscreen.h"
 
@@ -247,7 +248,11 @@ bool Offscreen::wait() {
     pending_ = false;
     // One second is far longer than any frame takes; waiting for ever would turn a lost device
     // into a hung launcher with nothing on screen to say so.
-    if (vkWaitForFences(ctx_->device(), 1, &fence_, VK_TRUE, 1'000'000'000ull) != VK_SUCCESS) {
+    const auto wait_start = std::chrono::steady_clock::now();
+    const auto result = vkWaitForFences(ctx_->device(), 1, &fence_, VK_TRUE, 1'000'000'000ull);
+    fence_wait_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - wait_start).count();
+    if (result != VK_SUCCESS) {
         error_ = "the GPU did not finish the frame within a second";
         return false;
     }

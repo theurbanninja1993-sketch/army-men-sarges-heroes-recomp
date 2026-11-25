@@ -203,3 +203,77 @@ actions appeared in either final scripted route. Both the renderer-active and
 headless checks passed; audible cutscene playback and actual mission completion
 remain outside this check. Raw evidence and repeatable scripts are retained under
 `work/diagnostics/report-154731-later-levels/` outside the source Git repository.
+
+
+## Native Bathroom resolution comparison and fence diagnostics (2026-11-25)
+
+Owner Windows laptop: RTX 3050 Laptop GPU, Standard Vulkan presentation, display
+60 Hz, interpolation off, local tail dispatch enabled. At 4x (3413x1920), 92.444
+seconds guest took 125.36 seconds host; pacing p99 136.24 ms, max 210.3 ms, 363
+frames over 33.4 ms. At 1x (853x480), 105.506 seconds guest took 105.53 seconds
+host; p99 18.25 ms, max 24.8 ms, zero frames over 33.4 ms. At 2x (1707x960),
+174.502 seconds guest took 174.59 seconds host; p99 29.63 ms, max 45.3 ms, five
+frames over 33.4 ms. Owner noticed no slowdown at 1x or 2x. These are different
+length manual runs, not controlled benchmarks. Resolution-dependent load is
+strongly implicated on this laptop; this does not diagnose the RTX 3090 reporter.
+
+Local frame-diagnostics-1 adds scheduled game-thread CPU time (GetThreadTimes on
+Windows; CLOCK_THREAD_CPUTIME_ID on Linux), offscreen fence wait wall time, and
+window fence wait wall time to the worst-frame records. Cumulative wait counters
+survive target recreation. Windows CPU accounting may be coarse at individual
+frame scale. Fence waits are host wall time, not GPU timestamps, and can include
+OS/driver scheduling. They overlap existing render/present measurements. Swapchain
+acquisition and other waits are not independently measured. Unsupported hosts
+report zero thread CPU time.
+
+USA and PAL Windows targets compiled successfully. Wine USA windowed smoke test
+ran 240 guest frames at 4x, exit 0, zero untranslated targets; new cpu/ow/ww fields
+were printed. This verifies instrumentation startup, not native Windows gameplay
+or a performance improvement. Local ZIP is in dist with suffix
+windows-frame-diagnostics-1; it is based on preview.2 plus dirty timing changes,
+marked in BUILD-INFO.json. No release was published. Next native test: reproduce
+the same Bathroom cutscene and gameplay at 4x/FPS 60, quit normally, return
+cpu-profile-level3-diag.txt and gameplay-log-level3-diag.txt.
+
+
+### Late-portion profiler (local frame-diagnostics-2)
+
+Owner's levels 1–3 session at 4x: 806.028 guest seconds / 830.68 host seconds;
+p99 18.46 ms, max 255.5 ms, 271 frames over 33.4 ms. Most retained worst frames
+show substantial scheduled game-thread CPU time and negligible fence waits. Frame
+47850: 255.5 ms wall, 234.4 ms thread CPU, approximately 0.2 ms fence waits, zero
+texture decodes/pipeline creation. This implicates CPU execution in these bursts,
+not predominantly fence waiting; it does not distinguish extra work from reduced
+execution speed, nor diagnose the other user's RTX 3090 system.
+
+Frame-diagnostics-2 records QueryThreadCycleTime deltas in worst-frame entries.
+These are Windows cycle accounting, not a hardware frequency sensor, and should
+not be converted into a claimed exact clock speed. A separate profile at
+<profile filename>.slow.txt contains samples taken when the current vblank
+interval has already exceeded 33.4 ms. It excludes the initial 33.4 ms of a slow
+frame, includes menu/loading waits, and is not a complete profile of all work
+inside slow frames. The original complete-run profile is still written. Sample
+classification reads the boundary while the game thread is suspended, before any
+allocation. Both profiles share the same stack walks; no additional sampler.
+
+USA/PAL Windows executables compile; a 1200-frame USA Wine smoke test at 4x exits
+normally, with zero untranslated targets, cycle counters and both profile files.
+This short smooth run had zero late-portion samples; an empty late profile is a
+valid result. Native reproduction remains required. No fix is claimed or
+published. Test the same levels 1–3 route at 4x/FPS 60 and return all three logs.
+
+
+Native diagnostics-2 run: 445.916 guest / 449.76 host seconds at 4x; p99 19.29 ms,
+58 frames >33.4 ms, max 161.5 ms. Late profile contains 241 samples versus 43079
+full-run samples. Exact diagnostic-2 primary map used for symbolization. Late
+leaf samples: 196/241 in game executable, 17 Arm7::step, 15 each main guest frame
+dispatch and fn_0c114120 callback wrapper, 13 call_indirect; rendering, fog maths,
+memcpy and other guest routines also represented. No single leaf dominates.
+Only 2 late leaf samples have the previously observed NVIDIA driver wait chain;
+fence timing likewise generally low in burst frames. Inclusive rendering stacks
+49/241; scheduler stacks 64/241 (overlap possible). This supports CPU-execution
+bursts across multiple paths, not a proven individual hot function, driver-fence
+bottleneck, or hardware power/thermal cause. 241 selected samples are insufficient
+to rule out other causes. Thread cycle counts do not establish hardware clocks.
+Next evidence should correlate host CPU/power telemetry with the bursts rather
+than repeat aggregate stack profiling or introduce a speculative runtime fix.

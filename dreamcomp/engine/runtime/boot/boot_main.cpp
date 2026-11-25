@@ -67,7 +67,13 @@
 #include "dream/render/vk/window.h"
 #endif
 
+// Scheduled CPU time, excluding sleeps and waits; zero on unsupported hosts.
+std::uint64_t thread_cpu_ns();
+std::uint64_t thread_cpu_cycles();
+
 namespace {
+
+std::atomic<std::int64_t> g_profile_frame_start_ns{0};
 
 struct StopRun {
     const char* why;
@@ -224,6 +230,8 @@ struct Pacing {
         float ms;
         std::uint64_t textures, pipelines;
         float render_ms, decode_ms, present_ms, input_ms;
+        float cpu_ms, offscreen_wait_ms, window_wait_ms;
+        std::uint64_t cpu_cycles;
     };
     // Keep the worst frames across the run, rather than filling this with FMV startup frames.
     std::vector<Late> late_frames;
@@ -239,8 +247,13 @@ struct Pacing {
                                        .count());
     }
     std::uint64_t last_textures = 0, last_pipelines = 0, last_render_ns = 0, last_decode_ns = 0;
+    std::uint64_t last_cpu_cycles = 0;
+    std::uint64_t last_cpu_ns = 0, last_offscreen_wait_ns = 0, last_window_wait_ns = 0;
     void vblank(std::uint64_t frame, std::uint64_t textures, std::uint64_t pipelines,
-                std::uint64_t render_ns, std::uint64_t decode_ns) {
+                std::uint64_t render_ns, std::uint64_t decode_ns,
+                std::uint64_t offscreen_wait_ns, std::uint64_t window_wait_ns) {
+        const auto cpu_ns = thread_cpu_ns();
+        const auto cpu_cycles = thread_cpu_cycles();
         const auto now = std::chrono::steady_clock::now();
         if (last.time_since_epoch().count() != 0 && intervals_ms.size() < 2'000'000) {
             const float ms = std::chrono::duration<float, std::milli>(now - last).count();
@@ -250,7 +263,11 @@ struct Pacing {
                                   pipelines - last_pipelines,
                                   static_cast<float>(render_ns - last_render_ns) * 1e-6f,
                                   static_cast<float>(decode_ns - last_decode_ns) * 1e-6f,
-                                  present_ms, input_ms};
+                                  present_ms, input_ms,
+                                  static_cast<float>(cpu_ns - last_cpu_ns) * 1e-6f,
+                                  static_cast<float>(offscreen_wait_ns - last_offscreen_wait_ns) * 1e-6f,
+                                  static_cast<float>(window_wait_ns - last_window_wait_ns) * 1e-6f,
+                                  cpu_cycles - last_cpu_cycles};
                 if (late_frames.size() < 64) {
                     late_frames.push_back(sample);
                 } else {
@@ -261,6 +278,12 @@ struct Pacing {
             }
         }
         last = now;
+        last_cpu_ns = cpu_ns;
+        last_cpu_cycles = cpu_cycles;
+        g_profile_frame_start_ns.store(std::chrono::duration_cast<std::chrono::nanoseconds>(
+            now.time_since_epoch()).count(), std::memory_order_relaxed);
+        last_offscreen_wait_ns = offscreen_wait_ns;
+        last_window_wait_ns = window_wait_ns;
         last_textures = textures;
         last_pipelines = pipelines;
         last_render_ns = render_ns;
@@ -308,14 +331,17 @@ struct Pacing {
             std::sort(worst.begin(), worst.end(),
                       [](const Late& a, const Late& b) { return a.frame < b.frame; });
             std::printf("pacing: worst frames (guest frame: ms, textures decoded, pipelines made, "
-                        "render ms, of which texture decode ms, present ms, input ms):");
+                        "render ms, of which texture decode ms, present ms, input ms, thread CPU ms, offscreen fence wait ms, window fence wait ms, thread CPU cycles):");
             for (const auto& l : worst)
-                std::printf(" %llu:%.0f/%llut/%llup/%.0fr/%.0fd/%.0fpr/%.0fi",
+                std::printf(" %llu:%.0f/%llut/%llup/%.0fr/%.0fd/%.0fpr/%.0fi/%.1fcpu/%.1fow/%.1fww/%llucyc",
                             static_cast<unsigned long long>(l.frame), static_cast<double>(l.ms),
                             static_cast<unsigned long long>(l.textures),
                             static_cast<unsigned long long>(l.pipelines),
                             static_cast<double>(l.render_ms), static_cast<double>(l.decode_ms),
-                            static_cast<double>(l.present_ms), static_cast<double>(l.input_ms));
+                            static_cast<double>(l.present_ms), static_cast<double>(l.input_ms),
+                            static_cast<double>(l.cpu_ms), static_cast<double>(l.offscreen_wait_ms),
+                            static_cast<double>(l.window_wait_ms),
+                            static_cast<unsigned long long>(l.cpu_cycles));
             std::printf("\n");
         }
     }
@@ -2797,7 +2823,8 @@ int main(int argc, char** argv) {
             read_pads();
             live->pacing.vblank(sys.spg.frames(), live->renderer.textures().decoded,
                                 live->renderer.pipelines, g_render_ns,
-                                live->renderer.textures().decode_ns);
+                                live->renderer.textures().decode_ns, live->offscreen.fence_wait_ns,
+                                live->window.fence_wait_ns);
         };
     }
 #endif
@@ -3588,6 +3615,8 @@ struct HostProfiler {
     unsigned interval_us = 1000;
     std::string file;
     std::unordered_map<std::string, std::uint64_t> stacks;  // "frames" -> count
+    std::unordered_map<std::string, std::uint64_t> slow_stacks;
+    std::uint64_t slow_samples = 0;
     std::uint64_t samples = 0, failed = 0;
     std::chrono::steady_clock::time_point started;
 };
@@ -3659,6 +3688,12 @@ DWORD WINAPI sampler_main(void*) {
                 RtlVirtualUnwind(UNW_FLAG_NHANDLER, image, ctx.Rip, fn, &ctx, &handler_data, &frame, nullptr);
             }
         }
+        // Classify while suspended so the frame boundary cannot change underneath us.
+        // Only the portion after 33.4 ms is selected, not the whole slow frame.
+        const auto frame_start = g_profile_frame_start_ns.load(std::memory_order_relaxed);
+        const auto sampled_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        const bool slow = frame_start != 0 && sampled_ns - frame_start > 33'400'000;
         ResumeThread(p.thread);
         if (n == 0) {
             ++p.failed;
@@ -3672,6 +3707,7 @@ DWORD WINAPI sampler_main(void*) {
             key += module_frame(pcs[i], names);
         }
         ++p.stacks[key];
+        if (slow) { ++p.slow_stacks[key]; ++p.slow_samples; }
         ++p.samples;
     }
     if (timer)
@@ -3679,6 +3715,15 @@ DWORD WINAPI sampler_main(void*) {
     return 0;
 }
 }  // namespace
+
+std::uint64_t thread_cpu_ns() {
+    FILETIME created{}, exited{}, kernel{}, user{};
+    if (!GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user)) return 0;
+    const auto ticks = [](FILETIME t) {
+        return (static_cast<std::uint64_t>(t.dwHighDateTime) << 32) | t.dwLowDateTime;
+    };
+    return (ticks(kernel) + ticks(user)) * 100;
+}
 
 std::uint64_t thread_cpu_cycles() {
     ULONG64 cycles = 0;
@@ -3726,6 +3771,18 @@ void host_profiler_stop() {
         std::fprintf(stderr, "profile: cannot write %s (%llu samples lost)\n", p.file.c_str(),
                      static_cast<unsigned long long>(p.samples));
     }
+    const std::string slow_file = p.file + ".slow.txt";
+    if (FILE* slow = std::fopen(slow_file.c_str(), "w")) {
+        std::fprintf(slow, "# dreamcomp late-portion profile: %llu samples; only frame age >33.4 ms; includes loading/menu waits\n",
+                     static_cast<unsigned long long>(p.slow_samples));
+        for (const auto& [stack, count] : p.slow_stacks)
+            std::fprintf(slow, "%llu %s\n", static_cast<unsigned long long>(count), stack.c_str());
+        std::fclose(slow);
+        std::printf("profile: %llu late-portion samples written to %s\n",
+                    static_cast<unsigned long long>(p.slow_samples), slow_file.c_str());
+    } else {
+        std::fprintf(stderr, "profile: cannot write %s\n", slow_file.c_str());
+    }
     if (p.thread)
         CloseHandle(p.thread);
     delete g_prof;
@@ -3737,6 +3794,14 @@ void install_crash_handler() {
 }
 void host_profiler_start(const std::string&, unsigned) {
     std::printf("profile: --profile is only implemented on Windows so far\n");
+}
+std::uint64_t thread_cpu_ns() {
+#if defined(__linux__)
+    timespec t{};
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t) == 0)
+        return static_cast<std::uint64_t>(t.tv_sec) * 1'000'000'000 + t.tv_nsec;
+#endif
+    return 0;
 }
 std::uint64_t thread_cpu_cycles() { return 0; }
 void host_profiler_stop() {}

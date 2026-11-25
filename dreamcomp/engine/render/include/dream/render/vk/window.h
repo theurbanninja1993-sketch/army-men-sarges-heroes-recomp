@@ -56,6 +56,8 @@ enum class Control : unsigned {
 
 class Window {
 public:
+    // Cumulative host wall time inside Vulkan fence waits (not GPU execution time).
+    std::uint64_t fence_wait_ns = 0;
     Window() = default;
     ~Window();
     Window(const Window&) = delete;
