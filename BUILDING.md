@@ -80,7 +80,7 @@ languages or 50 Hz. `ARMYMENSH_PAL_PROBE` and `DREAM_DEV_INTERPRETER=ON` remain 
 investigation tools and must not be used for the published release build.
 
 
-### PAL English60 Windows test build
+### PAL English60 Windows preview build
 
 Use the same verified PAL extraction and `ARMYMENSH_PAL_SUPPORT=ON` configuration
 with the Windows toolchain and `DREAM_DEV_INTERPRETER=OFF`. Build both
@@ -91,7 +91,7 @@ rules are shared with Linux. For a Linux cross-build, put the native Linux
 Package with:
 
 ```sh
-python3 tools/package_release_windows.py --pal --version 0.1.8-pal-windows-test.1
+python3 tools/package_release_windows.py --pal --version 0.1.8-pal-preview.2
 ```
 
 The ZIP includes both executables, SDL3.dll, bootstrap
@@ -100,3 +100,18 @@ Run `army-men-sarges-heroes-recomp.exe` and select the PAL disc in the normal
 launcher. English/60 Hz is enforced, and PAL keeps its separate default memory
 card. Native Windows gameplay testing is required before publishing PAL Windows
 support; Wine checks alone do not establish it.
+
+
+For a Windows-only release, create its matching source archive without staging an
+unrelated Linux executable. Supply a reviewed source stage with the same pinned
+SDL, RmlUi and FreeType versions:
+
+```sh
+python3 tools/package_source_release.py --version 0.1.8-pal-preview.2 \
+  --dependency-source-stage release-stage/army-men-sarges-heroes-recomp-v0.1.8-pal-preview.1-source
+```
+
+This copies the current tracked project source, the reviewed dependency sources,
+and the Windows build's frontend fonts, then audits the complete result. It excludes
+disc images, extracted files, generated translations, captures and saves. Commit
+reviewed changes before packaging so BUILD-INFO identifies the matching source.

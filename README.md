@@ -10,13 +10,18 @@ with [Dreamcomp](https://github.com/danielgomesvieira2000/dreamcomp).
 level 1 through level 2, mouse and keyboard, and Classic and Modern controller modes. Steam Deck
 has not yet been validated separately.
 
-## PAL preview (Linux)
+## PAL preview (English / 60 Hz)
 
-The **v0.1.8-pal-preview.1** prerelease adds the verified European **T9708D V1.001** disc.
+The PAL previews add the verified European **T9708D V1.001** disc.
+
+- **Windows: [v0.1.8-pal-preview.2](https://github.com/theurbanninja1993-sketch/army-men-sarges-heroes-recomp/releases/tag/v0.1.8-pal-preview.2)** includes the Windows performance update for both USA and PAL.
+- **Linux: [v0.1.8-pal-preview.1](https://github.com/theurbanninja1993-sketch/army-men-sarges-heroes-recomp/releases/tag/v0.1.8-pal-preview.1)** remains the Linux PAL preview.
+
+Download the Windows ZIP from preview 2 directly when testing that prerelease.
 Use the same executable and Load Game screen; the launcher detects your disc automatically.
 The preview always loads **English at 60 Hz**. The original startup language/video choices
 are overridden: other languages and 50 Hz are not implemented and previously crashed.
-PAL support for Windows is being tested; the existing Windows stable release supports USA discs.
+The stable Windows release remains USA-only; the Windows prerelease includes both regions.
 
 Player testing covers the complete first campaign level and loading/brief gameplay in every
 PAL mission, reported to run at full speed. Snow's helicopter audio was also checked.
@@ -29,17 +34,19 @@ PAL has a separate default memory card in `dreamcomp/armymensh_pal_en60`; launch
 remain shared. Existing cards are not converted between regions. A custom `--vmu` path is
 respected.
 
-### Windows PAL test package
+### Windows performance preview
 
-The Windows PAL English/60 Hz test package is for native Windows validation before release.
+The **v0.1.8-pal-preview.2** Windows prerelease includes the tested performance fix and PAL English/60 Hz support.
 Extract the complete ZIP and run `army-men-sarges-heroes-recomp.exe`, then select your PAL
 disc normally. Keep `armymensh_pal_controls.exe`, `SDL3.dll`, the configuration files and
 `frontend` folder together. Both USA and PAL are included; PAL uses a separate default memory
-card. Native Windows laptop testing has confirmed normal gameplay, controls and cutscenes
-with both USA and PAL discs at 4x resolution. The current test package enables the
+card. Native Windows laptop testing has confirmed normal gameplay and controls
+with both USA and PAL discs at 4x resolution. This preview enables the
 Windows control-flow performance fix by default; it no longer needs an environment
 variable. Full Windows campaign coverage remains pending. An intermittent PAL
-subtitle-box flicker remains under investigation.
+subtitle-box flicker remains under investigation. Reported slowdowns starting around
+later missions have not been reproduced or confirmed fixed; include the level, disc
+region, settings and runtime log when reporting them.
 
 ## Play
 

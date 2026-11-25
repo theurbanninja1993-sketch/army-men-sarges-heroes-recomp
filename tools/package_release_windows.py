@@ -42,7 +42,7 @@ def main() -> None:
     ap.add_argument("--sdl-dir", type=Path, default=Path("/tmp/opencode/sdl3-win/SDL3-3.4.18"))
     ap.add_argument("--linux-stage", type=Path, default=None,
                     help="a Linux release-stage folder to take license texts from")
-    ap.add_argument("--version", default="0.1.8-pal-windows-test.1")
+    ap.add_argument("--version", default="0.1.8-pal-preview.2")
     ap.add_argument("--pal", action="store_true", help="include the PAL English60 preview runtime")
     a = ap.parse_args()
     root = Path(__file__).resolve().parent.parent

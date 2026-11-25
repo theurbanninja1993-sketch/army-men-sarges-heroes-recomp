@@ -125,3 +125,81 @@ and log wording changed. Broader Windows campaign coverage is still pending.
 Intermittent PAL subtitle-box flicker remains open and also occurred while the
 optimization was disabled. USA's missing opening subtitles are original disc
 content, established separately in cutscene-subtitles.md; no subtitle fix was made.
+
+## Later-level report investigation (2026-11-25)
+
+The supplied report154731 attachment, `ARMY0908.log`, is a redumper optical-disc
+read log. It reports a failed dump attempt, not game execution. It contains no
+runtime build, GPU, FPS, frame pacing, cutscene, or audio statistics. It does not
+establish that the image actually played is damaged. Hardware/settings from the
+older report66081 must not be assigned to this different report.
+
+### Distribution check
+
+GitHub's live release list still identifies v0.1.7 as latest stable; the PAL
+preview1 release is Linux-only. The public Windows v0.1.7 archive has SHA256
+f1d8c505adfaa5490c5962612fa4561d9c8c7b78b402f059a01d2b5a29c31e00 and BUILD-INFO source
+`dbbd29d2ab97af59d1b5bcfeac7d8ffbe7fa5a14`, matching the tag. Our local test4 archive
+identifies source `f1727765ab702cf93dec39947f152990a180bf52`. The public archive was
+verified against its GitHub asset digest before testing. It does not include the
+new dispatcher/signature-comparison changes. This is an actionable distribution
+gap, but does not prove which build the reporter ran or that this explains their
+symptoms. No matching public GitHub slowdown issue was found among the repository's
+current issues; the RecompLauncher report itself was not available here.
+
+### Source audit for session growth
+
+The Vulkan texture cache has an entry-count LRU threshold of1536 and trims toward
+1024 entries; old overwritten allocations are retired and freed after the frame
+ring delay. This bounds entry count, not GPU bytes or driver allocations. The SDL
+audio sink has an8192-sample high-water limit and drops blocks rather than allowing
+its source queue to grow indefinitely. These checks did not identify an obvious
+unbounded queue/cache defect; they do not rule out leaks or hardware-specific
+memory pressure.
+
+### Reproducible transition checks
+
+Compared the exact public Windows package and existing test4 package under Wine,
+using the owner's USA CDI, isolated settings/cards, fixed RTC seed, native password
+validation and native Exit Level actions. The route selects Bathroom3 (TDBWL),
+exits to the native main menu, selects Riff4 (MSTRMN), exits, and selects Bathroom3
+again. Each run advances28000 guest frames (467.101 guest seconds). This is a
+transition/startup check, not completion of campaign missions or prolonged combat.
+
+Both windowed packages completed the route, with two returns to the native main
+menu and final RAM showing gameplay phase3/level3. Both reported zero untranslated
+calls, zero texture decode failures, and808 cumulative texture decodes. Native
+menu traces verify all three password/loading paths. Wine-process resident memory
+at sampled loading/menu boundaries rose modestly on the new level and then held:
+
+| Package | First Bathroom load | Riff load | Return to Bathroom |
+| --- | ---: | ---: | ---: |
+| Test4 candidate | 210340 KiB | 214456 KiB | 214456 KiB |
+| Public v0.1.7 | 213496 KiB | 216736 KiB | 216740 KiB |
+
+These are Linux `/proc` RSS observations for the Wine game process, not native
+Windows working-set or GPU-memory measurements. The short route did not exhibit
+large continuing growth. Candidate/public displayed741/27982 frames respectively
+under the local desktop compositor, so their windowed elapsed times are NOT a
+valid performance comparison. Their guest logic/render work still advanced, but
+presentation differed. Xvfb was attempted and rejected because this host's virtual
+X server lacks DRI3 Vulkan presentation; that is a test-environment limitation,
+not a game failure. A headless repetition isolates guest CPU execution from this
+presentation confound; its final results are in the workspace handoff/evidence.
+
+The tests disable audio playback and frame interpolation and run unthrottled. They
+cannot establish audible cutscene quality, native Windows frame pacing, high-refresh
+interpolation behavior, VRAM pressure, or state carried by actually completing the
+preceding missions. No new runtime fix is justified by these results alone. The
+reporter trying the newer package and supplying its actual runtime log remains the
+most useful discriminating check.
+
+Headless repetition completed for both packages: same28000-frame route, final
+phase3/level3 and zero untranslated calls. Runtime-reported host execution was
+123.25s for the candidate and123.74s for public v0.1.7. These essentially equal
+Wine timings do not establish a later-level CPU regression or predict native
+Windows performance. Host system load was not controlled. No unsolicited menu
+actions appeared in either final scripted route. Both the renderer-active and
+headless checks passed; audible cutscene playback and actual mission completion
+remain outside this check. Raw evidence and repeatable scripts are retained under
+`work/diagnostics/report-154731-later-levels/` outside the source Git repository.
